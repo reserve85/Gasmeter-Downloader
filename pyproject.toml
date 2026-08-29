@@ -1,0 +1,17 @@
+[project]
+name = "gasmeter-downloader"
+version = "0.1.0"
+description = "Gasmeter Downloader - PyQt6 desktop app for AI-on-the-Edge gas meter logfiles"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

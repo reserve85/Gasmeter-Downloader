@@ -1,0 +1,27 @@
+name: Cleanup
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete old workflow runs and artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete workflow runs older than 3 days, keeping the newest 5.
+          runs=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.created_at < (now - 259200 | todateiso8601)) | .id')
+          for id in $runs; do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$id" || true
+          done
+          # Delete all expired artifacts (default retention applies).
+          gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" --jq '.artifacts[] | .id' \
+            | while read -r id; do
+                gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
+              done

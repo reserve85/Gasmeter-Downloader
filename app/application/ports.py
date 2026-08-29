@@ -1,0 +1,77 @@
+"""Protocol definitions for all application ports.
+
+The application layer depends only on these protocols; adapters live in the
+infrastructure layer and are wired in the composition root.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Protocol
+
+from app.domain.entities import (
+    DayReading,
+    GasParameterInterval,
+    LogCategory,
+    LogLevel,
+    ParseResult,
+)
+
+
+class Clock(Protocol):
+    def today(self) -> date: ...
+
+
+class EventLogger(Protocol):
+    def log(self, category: LogCategory, level: LogLevel, message: str) -> None: ...
+
+
+class MeterRepository(Protocol):
+    def get_reading(self, day: date) -> DayReading | None: ...
+    def get_readings(self, start: date | None, end: date | None) -> list[DayReading]: ...
+    def all_days_with_import(self) -> set[date]: ...
+    def save_import(self, day: date, value: Decimal) -> None: ...
+    def save_interpolated(self, day: date, value: Decimal) -> None: ...
+    def save_manual(self, day: date, value: Decimal) -> None: ...
+    def restore_to_original(self, day: date) -> None: ...
+    def latest_reading_day(self) -> date | None: ...
+
+
+class GasParameterRepository(Protocol):
+    def all_intervals(self) -> list[GasParameterInterval]: ...
+    def upsert_interval(self, interval: GasParameterInterval) -> None: ...
+    def delete_interval(self, valid_from: date, valid_to: date | None) -> None: ...
+    def parameter_for(self, day: date) -> GasParameterInterval | None: ...  # may return None
+
+
+class LogfileSource(Protocol):
+    """AI-on-the-Edge device file server."""
+
+    def available_days(self) -> list[date]: ...
+    def download(self, day: date, target_dir: Path) -> Path | None: ...  # None = 404/not available
+
+
+class LogfileParser(Protocol):
+    def parse(self, path: Path) -> ParseResult: ...
+
+
+class LogfileArchiver(Protocol):
+    def archive(self, path: Path) -> Path | None: ...  # move, never delete; None if already archived
+    def is_archived(self, path: Path) -> bool: ...
+
+
+class AppSettings(Protocol):
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def set(self, key: str, value: Any) -> None: ...
+    def to_dict(self) -> dict: ...
+
+
+class UpdatePort(Protocol):
+    """Thin facade over ``github_updater.UpdateService``."""
+
+    def check(self, token: str) -> dict: ...
+    def download(self, url: str, token: str, progress) -> str: ...
+    def apply(self, path: str) -> bool: ...
+    def restart(self) -> None: ...

@@ -1,0 +1,1 @@
+"""Logfile parsing adapters."""

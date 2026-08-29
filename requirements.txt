@@ -1,0 +1,8 @@
+PyQt6>=6.6.0          # GUI toolkit
+PyQt6-Charts>=6.6.0   # QChart / QtCharts
+github-updater @ git+https://github.com/reserve85/Python_Units.git   # self-update only
+cryptography>=41.0.0  # optional encrypted GitHub token
+pyyaml>=6.0           # app config YAML
+pytest>=7.4.0         # dev
+pytest-cov>=4.1.0     # dev
+ruff>=0.1.0           # dev (lint gate)

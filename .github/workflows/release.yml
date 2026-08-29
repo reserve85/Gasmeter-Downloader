@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Write version from tag
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          Set-Content app/_version.py "__version__ = `"$version`""
+          Write-Host "Building version $version"
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Build one-file exe
+        run: pyinstaller --onefile --windowed --name GasmeterDownloader --hidden-import PyQt6.QtCharts app/main.py
+
+      - name: Create zip
+        run: Compress-Archive -Path dist\GasmeterDownloader.exe -DestinationPath dist\GasmeterDownloader.zip -Force
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/GasmeterDownloader.exe
+            dist/GasmeterDownloader.zip
+          generate_release_notes: true
