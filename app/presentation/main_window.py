@@ -66,6 +66,16 @@ class MainWindow(QMainWindow):
 
         services.controller.refresh()
         self._logger.log(LogCategory.GUI, LogLevel.INFO, "Main window ready")
+    def closeEvent(self, event):  # noqa: N802
+        """Persist window geometry for the next start."""
+        try:
+            size = self.size()
+            self._svc.settings.set("window.width", size.width())
+            self._svc.settings.set("window.height", size.height())
+        except Exception:  # noqa: BLE001
+            pass
+        super().closeEvent(event)
+
     # -- construction -----------------------------------------------------------
     def _build_toolbar_and_menus(self) -> None:
         toolbar = QToolBar("main", self)
