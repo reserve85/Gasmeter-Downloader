@@ -147,6 +147,8 @@ class MeterPoint:
     day: date
     adjusted_value: Decimal  # meter progression from DB (m³)
     display_value: Decimal  # converted to current view unit
+    source: Source  # helps rendering interpolated spans dashed
+    interpolated: bool = False  # True when this reading came from interpolation
 
 
 @dataclass(frozen=True, slots=True)

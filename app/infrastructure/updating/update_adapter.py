@@ -44,3 +44,14 @@ class GithubUpdateAdapter:
     def restart(self) -> None:
         service = _build_service()
         service.restart_app()
+
+    def clean_old_files(self) -> None:
+        """Remove leftover ``<exe>.old`` backups (no-op in dev / non-frozen)."""
+        if not getattr(sys, "frozen", False):
+            return
+        try:
+            from github_updater import UpdateService  # type: ignore[import-not-found]
+
+            UpdateService.clean_old_files(sys.executable)
+        except Exception:  # noqa: BLE001
+            pass

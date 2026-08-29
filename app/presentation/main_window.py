@@ -239,14 +239,26 @@ class MainWindow(QMainWindow):
             return
         from app.application.models import ParamsIntervalRequest
 
+        errors: list[str] = []
         for upsert in upserts:
-            self._svc.gas_parameters_use_case.upsert(
-                ParamsIntervalRequest(
-                    valid_from=upsert[0],
-                    valid_to=upsert[1],
-                    calorific_value=upsert[2],
-                    z_value=upsert[3],
+            try:
+                self._svc.gas_parameters_use_case.upsert(
+                    ParamsIntervalRequest(
+                        valid_from=upsert[0],
+                        valid_to=upsert[1],
+                        calorific_value=upsert[2],
+                        z_value=upsert[3],
+                    )
                 )
+            except ValueError as exc:
+                errors.append(str(exc))
+        for valid_from, valid_to in deletes:
+            self._svc.gas_parameters_use_case.delete(valid_from, valid_to)
+        if errors:
+            QMessageBox.warning(
+                self,
+                self._tr.t("settings.title"),
+                self._tr.t("settings.invalid", errors="; ".join(errors[:3])),
             )
         language = changes.get("app.language", "auto")
         self._change_language(language)
@@ -271,12 +283,9 @@ class MainWindow(QMainWindow):
 
     def _change_language(self, language: str) -> None:
         if language == "auto":
-            import locale
+            from app.main import _windows_primary_language
 
-            try:
-                language = "de" if (locale.getdefaultlocale()[0] or "en").startswith("de") else "en"
-            except (TypeError, ValueError):
-                language = "en"
+            language = "de" if _windows_primary_language() == 7 else "en"
         self._tr.set_language(language)
         self._svc.settings.set("app.language", language)
         self.setWindowTitle(self._tr.t("app.title"))

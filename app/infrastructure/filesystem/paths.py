@@ -5,7 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# this module lives at <root>/app/infrastructure/filesystem/paths.py
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # 4 levels up
 
 
 def base_dir() -> Path:

@@ -22,6 +22,13 @@ from app.domain.entities import (
 from app.domain.conversion import factor_for_day
 
 
+class _DefaultClock:
+    """Local fallback clock; the real one is injected from the composition root."""
+
+    def today(self) -> date:
+        return date.today()
+
+
 class GetDashboardUseCase:
     """Reads readings + parameters, then produces every chart/table artifact.
 
@@ -29,11 +36,12 @@ class GetDashboardUseCase:
     aggregation in the UI is instant (no re-query of the database).
     """
 
-    def __init__(self, repo, params_repo, settings, logger):
+    def __init__(self, repo, params_repo, settings, logger, clock=None):
         self._repo = repo
         self._params_repo = params_repo
         self._settings = settings
         self._logger = logger
+        self._clock = clock or _DefaultClock()
 
     def run(self, request: QueryRequest) -> Dashboard:
         start, end = self._resolve_range(request)
@@ -87,7 +95,7 @@ class GetDashboardUseCase:
         if all_readings:
             days = [r.day for r in all_readings]
             return min(days), max(days)
-        end = date.today()
+        end = self._clock.today()
         return end - timedelta(days=30), end
 
     def _build_previous_year(self, request, consumption, unit, intervals):

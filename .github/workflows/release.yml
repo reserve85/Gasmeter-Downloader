@@ -32,7 +32,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
 
       - name: Build one-file exe
-        run: pyinstaller --onefile --windowed --name GasmeterDownloader --hidden-import PyQt6.QtCharts app/main.py
+        run: pyinstaller --onefile --windowed --name GasmeterDownloader --hidden-import PyQt6.QtCharts --hidden-import github_updater app/main.py
 
       - name: Create zip
         run: Compress-Archive -Path dist\GasmeterDownloader.exe -DestinationPath dist\GasmeterDownloader.zip -Force

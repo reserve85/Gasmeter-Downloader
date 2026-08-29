@@ -48,7 +48,11 @@ class SettingsDialog(QDialog):
         self._tr = tr
         self._settings_dict = settings_dict
         self.setWindowTitle(tr.t("settings.title"))
-        self._intervals = list(intervals)
+        self._rows: list[tuple[date, date | None, Decimal, Decimal]] = [
+            (i.valid_from, i.valid_to, i.calorific_value, i.z_value)
+            for i in intervals
+        ]
+        self._original_rows: list[tuple[date, date | None, Decimal, Decimal]] = list(self._rows)
 
         root = QVBoxLayout(self)
 
@@ -181,13 +185,8 @@ class SettingsDialog(QDialog):
 
     def _refresh_gas_table(self) -> None:
         self._gas_table.setRowCount(0)
-        for interval in self._intervals:
-            self._append_interval_row(
-                interval.valid_from,
-                interval.valid_to,
-                interval.calorific_value,
-                interval.z_value,
-            )
+        for (from_day, to_day, cal, z) in self._rows:
+            self._append_interval_row(from_day, to_day, cal, z)
 
     def _append_interval_row(self, from_day: date, to_day: date | None, cal: Decimal, z: Decimal) -> None:
         row = self._gas_table.rowCount()
@@ -205,18 +204,23 @@ class SettingsDialog(QDialog):
         cal = Decimal(str(self._cal_spin.value()))
         z = Decimal(str(self._z_spin.value()))
         self._append_interval_row(from_day, to_day, cal, z)
-        self._intervals.append((from_day, to_day, cal, z))
+        self._rows.append((from_day, to_day, cal, z))
 
     def _delete_interval(self) -> None:
         row = self._gas_table.currentRow()
-        if row < 0 or row >= len(self._intervals):
+        if row < 0 or row >= len(self._rows):
             return
-        self._intervals.pop(row)
+        self._rows.pop(row)
         self._gas_table.removeRow(row)
 
     # -- result ----------------------------------------------------------------
     def collect(self) -> tuple[dict, list, list]:
-        """Returns (settings_changes, param_upserts, param_deletes)."""
+        """Returns (settings_changes, param_row_upserts, param_deletes).
+
+        ``param_deletes`` is a list of ``(valid_from, valid_to)`` pairs for
+        intervals that existed in the database when the dialog opened but were
+        removed by the user.
+        """
         changes: dict = {
             "device.ip": self._ip_edit.text().strip(),
             "device.max_download_days": self._max_days.value(),
@@ -229,4 +233,9 @@ class SettingsDialog(QDialog):
         token = self._token_edit.text().strip()
         if token:
             changes["update.token"] = token
-        return changes, self._intervals, []
+        current_keys = {(vf, vt) for (vf, vt, _cal, _z) in self._rows}
+        deletes = [
+            (vf, vt) for (vf, vt, _cal, _z) in self._original_rows
+            if (vf, vt) not in current_keys
+        ]
+        return changes, list(self._rows), deletes

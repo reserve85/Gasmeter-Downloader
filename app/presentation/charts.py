@@ -19,7 +19,7 @@ from PyQt6.QtCharts import (
     QValueAxis,
 )
 from PyQt6.QtCore import QDate, QDateTime, QTime, Qt
-from PyQt6.QtGui import QPen
+from PyQt6.QtGui import QColor, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.domain.aggregation import shift_previous
-from app.domain.entities import Aggregation, Dashboard, ViewUnit
+from app.domain.entities import Aggregation, Dashboard, MeterPoint, ViewUnit
 from app.domain.conversion import point_value
 from app.presentation.i18n import Translator
 
@@ -81,30 +81,66 @@ def _bar_chart(categories: list[str], sets: list[tuple[str, list[float]]], dark:
     return chart
 
 
-def _line_chart(points: list[tuple[float, float]], dark: bool) -> QChart:
-    chart = _make_chart(dark)
-    line = QLineSeries()
-    for x, y in points:
-        line.append(x, y)
-    chart.addSeries(line)
-    axis_x = QDateTimeAxis()
-    axis_x.setFormat("yyyy-MM")
-    axis_y = QValueAxis()
-    chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
-    chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
-    line.attachAxis(axis_x)
-    line.attachAxis(axis_y)
-    if points:
-        xs = [p[0] for p in points]
-        axis_x.setRange(_qdt(xs[0]), _qdt(xs[-1]))
-    return chart
-
-
 def _qdt(days_since_epoch: float) -> QDateTime:
     from datetime import timedelta
 
     d = _EPOCH + timedelta(days=days_since_epoch)
     return QDateTime(QDate(d.year, d.month, d.day), QTime(0, 0, 0))
+
+
+def _meter_chart(points: list[MeterPoint], dark: bool, tr: Translator) -> QChart:
+    """Cumulative meter line; interpolated spans are drawn dashed and faint."""
+    chart = _make_chart(dark)
+    legend = chart.legend()
+    legend.setVisible(True)
+    if not points:
+        return chart
+
+    # split into contiguous runs by data quality
+    runs: list[tuple[bool, list[MeterPoint]]] = []
+    for point in points:
+        if runs and runs[-1][0] == point.interpolated:
+            runs[-1][1].append(point)
+        else:
+            runs.append((point.interpolated, [point]))
+
+    for is_interpolated, run in runs:
+        line = QLineSeries()
+        for point in run:
+            line.append(_days_since_epoch(point.day), float(point.display_value))
+        if is_interpolated:
+            # single-point interpolated runs render nothing; a run needs >=2 points
+            if len(run) < 2:
+                continue
+            line.setName(tr.t("source.interpolated"))
+            pen = line.pen()
+            pen.setStyle(Qt.PenStyle.DashLine)
+            pen.setColor(QColor(0x99, 0x99, 0x99))
+            line.setPen(pen)
+        else:
+            line.setName(tr.t("source.logfile"))
+            pen = line.pen()
+            pen.setColor(QColor(0x00, 0x78, 0xD4))
+            pen.setWidth(1)
+            line.setPen(pen)
+        chart.addSeries(line)
+
+    axis_x = QDateTimeAxis()
+    axis_x.setFormat("yyyy-MM")
+    axis_y = QValueAxis()
+    chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+    chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+    for series in chart.series():
+        series.attachAxis(axis_x)
+        series.attachAxis(axis_y)
+
+    xs = [_days_since_epoch(p.day) for p in points]
+    if xs:
+        lo, hi = min(xs), max(xs)
+        if hi - lo < 1:
+            hi = lo + 1  # avoid empty range for a single point
+        axis_x.setRange(_qdt(lo), _qdt(hi))
+    return chart
 class ChartsTab(QWidget):
     """Scrollable card dashboard bound to a DashboardController."""
 
@@ -258,15 +294,13 @@ class ChartsTab(QWidget):
             self._cards.addWidget(_build_card(self._tr.t("charts.monthly.title"), self._monthly_view))
 
     def _render_kpis(self, dashboard: Dashboard) -> None:
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
-
         kpi = dashboard.kpi
         max_day_text = (
             self._tr.format_date(kpi.max_day.day) + " · " + self._tr.format_number(point_value(kpi.max_day, dashboard.unit))
             if kpi.max_day
             else "–"
         )
-        box = QGroupBox("Overview")
+        box = QGroupBox(self._tr.t("charts.overview"))
         grid = QGridLayout(box)
         labels = [
             (self._tr.t("charts.kpi.total"), self._tr.format_number(kpi.total_energy)),
@@ -290,8 +324,7 @@ class ChartsTab(QWidget):
         self._cards.insertWidget(0, box)
 
     def _render_meter(self, dashboard: Dashboard) -> None:
-        points = [(_days_since_epoch(p.day), float(p.display_value)) for p in dashboard.meter_series]
-        chart = _line_chart(points, self._dark)
+        chart = _meter_chart(dashboard.meter_series, self._dark, self._tr)
         chart.setTitle(f"{self._tr.t('charts.meter.title')} ({dashboard.unit.value})")
         self._meter_view.setChart(chart)
     def _render_usage(self, dashboard: Dashboard) -> None:

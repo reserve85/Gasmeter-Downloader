@@ -53,5 +53,7 @@ def test_change_callback_invoked(qapp):
     theme = WindowsTheme(QApplication.instance())
     calls = []
     theme.install_change_callback(lambda dark: calls.append(dark))
-    theme._on_native_change()  # noqa: SLF001
-    assert calls == [theme.current_is_dark()]
+    # force a "different" theme state so the poll er events
+    theme._current_dark = not theme.current_is_dark()  # noqa: SLF001
+    theme._poll()  # noqa: SLF001
+    assert calls and calls[-1] == theme._current_dark  # noqa: SLF001

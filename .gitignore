@@ -13,10 +13,17 @@ build/
 
 # Runtime data
 *.db
+*.db-shm
+*.db-wal
 config/app_config.yaml
 downloads/
 archive/
+gasmeter.lock
+GasmeterDownloader.exe
 
 # IDE
 .vscode/
 .idea/
+
+# Local test fixtures (copies live in tests/samples/)
+test/logfiles/

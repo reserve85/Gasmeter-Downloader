@@ -1,18 +1,17 @@
 """Native Windows light/dark theme detection + Fusion palette application.
 
-Reads ``HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize``
-and listens for ``WM_SETTINGCHANGE``/``WM_THEMECHANGED`` via a native event
-filter so the app follows theme switches live. Exposes a ``theme_changed``
-signal object for Qt wiring.
+The theme state is detected from
+``HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize``
+and re-checked on a short QTimer so the app follows OS theme switches live
+without any fragile native event-filter glue (a native filter is what made an
+earlier build hard-crash inside Qt's event dispatch).
 """
 
 from __future__ import annotations
 
-import ctypes
 import logging
-from ctypes import wintypes
 
-from PyQt6.QtCore import QAbstractNativeEventFilter, QObject
+from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtGui import QColor, QPalette
 
 from app.domain.entities import LogCategory, LogLevel
@@ -20,8 +19,7 @@ from app.domain.entities import LogCategory, LogLevel
 logger = logging.getLogger(__name__)
 
 THEME_REGISTRY_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-WM_SETTINGCHANGE = 0x001A
-WM_THEMECHANGED = 0x031A
+THEME_POLL_MS = 2000
 
 
 def is_windows_dark() -> bool:
@@ -67,39 +65,32 @@ def dark_palette() -> QPalette:
     return palette
 
 
-class _ThemeEventFilter(QAbstractNativeEventFilter):
-    def __init__(self, owner: "WindowsTheme"):
-        super().__init__()
-        self._owner = owner
-
-    def nativeEventFilter(self, event_type, message):  # noqa: N802
-        if event_type == b"windows_generic_MSG":
-            try:
-                msg = wintypes.MSG.from_address(int(message))
-                if msg.message in (WM_SETTINGCHANGE, WM_THEMECHANGED):
-                    self._owner._on_native_change()  # noqa: SLF001
-            except (ValueError, TypeError, ctypes.ArgumentError):
-                pass
-        return False
-
-
 class WindowsTheme(QObject):
-    """Owns the theme state and an event-filter bridge; not a Qt signal emitter
-    itself (the presentation layer connects via a callback to stay decoupled)."""
+    """Owns the theme state; notifies registered callbacks on OS theme changes.
+
+    Detection runs on a 2 s timer (the registry is cheap to read) instead of a
+    native event filter - robust across Qt versions and platforms.
+    """
 
     def __init__(self, app, parent: QObject | None = None):
         super().__init__(parent)
         self._app = app
         self._callbacks: list = []
-        self._filter = _ThemeEventFilter(self)
-        app.installNativeEventFilter(self._filter)
+        self._current_dark: bool | None = None
+        self._timer = QTimer(self)
+        self._timer.setInterval(THEME_POLL_MS)
+        self._timer.timeout.connect(self._poll)
+        self._timer.start()
 
     def install_change_callback(self, callback) -> None:
-        """``callback(dark: bool)`` invoked (UI-thread assumed) on theme change."""
+        """``callback(dark: bool)`` invoked (UI thread) on theme change."""
         self._callbacks.append(callback)
 
-    def _on_native_change(self) -> None:
+    def _poll(self) -> None:
         dark = is_windows_dark()
+        if self._current_dark == dark:
+            return
+        self._current_dark = dark
         for callback in self._callbacks:
             try:
                 callback(dark)
@@ -111,7 +102,9 @@ class WindowsTheme(QObject):
         app.setPalette(dark_palette() if dark else light_palette())
 
     def current_is_dark(self) -> bool:
-        return is_windows_dark()
+        dark = is_windows_dark()
+        self._current_dark = dark
+        return dark
 
     def log_theme(self, logger_adapter, dark: bool) -> None:
         logger_adapter.log(LogCategory.THEME, LogLevel.INFO, f"Theme: {'dark' if dark else 'light'}")

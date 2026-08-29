@@ -75,8 +75,15 @@ class UpdateDialog(QDialog):
         url = self._check_result.get("download_url", "")
         if not url:
             return
-        ok = self._apply_fn(url)
+        try:
+            ok = self._apply_fn(url)
+        except Exception as exc:  # noqa: BLE001 - dev mode / packaging errors
+            self._status.setText(self._tr.t("update.error", error=str(exc)))
+            return
         if not ok:
             self._status.setText(self._tr.t("update.error", error="apply failed"))
             return
         self._status.setText(self._tr.t("update.restarted"))
+        from PyQt6.QtWidgets import QApplication
+
+        QApplication.quit()

@@ -1,8 +1,13 @@
+#!/usr/bin/env python3
+# ruff: noqa: E402  - imports below must follow the sys.path bootstrap
 """Composition root - builds and wires the whole application.
 
 Order: single-instance guard -> directories -> settings -> logger ->
 theme -> database + repositories -> parsers/client/archiver -> use cases ->
 translator/controller -> main window. ``main()`` is the PyInstaller entry point.
+
+The module is importable both as ``python -m app.main`` and as
+``python app/main.py`` (the script form inserts the project root on sys.path).
 """
 
 from __future__ import annotations
@@ -12,8 +17,12 @@ import traceback
 from decimal import Decimal
 from pathlib import Path
 
-from PyQt6.QtCore import QLockFile
-from PyQt6.QtWidgets import QApplication
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from PyQt6.QtCore import QLockFile  # noqa: E402
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from app import __version__
 from app.application.use_cases.gas_parameters import GasParametersUseCase
@@ -51,15 +60,25 @@ class AppServices:
 def _resolve_language(lang: str) -> str:
     if lang != "auto":
         return lang if lang in ("en", "de") else "en"
-    try:
-        import locale
+    primary = _windows_primary_language()
+    if primary == 7:  # LANG_GERMAN
+        return "de"
+    return "en"
 
-        return "de" if (locale.getdefaultlocale()[0] or "en").startswith("de") else "en"
-    except (TypeError, ValueError):
-        return "en"
+
+def _windows_primary_language() -> int | None:
+    """Best-effort primary Windows UI language id (0x07 = German)."""
+    try:
+        import ctypes
+
+        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+        return int(lang_id) & 0x3FF
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def open_database(settings, db_path):
+    """Open SQLite repositories (settings unused; kept for interface clarity)."""
     return SqliteMeterRepository(db_path), SqliteGasParameterRepository(db_path)
 
 
@@ -108,6 +127,7 @@ def main() -> None:
     client = HttpLogfileClient(str(settings.get("device.ip", "192.168.10.65")))
     clock = SystemClock()
     update_adapter = build_update_service()
+    update_adapter.clean_old_files()
     token_crypto = TokenCrypto(dirs["config"] / ".gasmeter_token_key")
 
     sync_use_case = SyncMissingLogfilesUseCase(
@@ -162,6 +182,11 @@ def main() -> None:
 
     exit_code = app.exec()
     logger.log(LogCategory.SHUTDOWN, LogLevel.INFO, "Shutting down")
+    try:
+        theme._timer.stop()  # noqa: SLF001 - clean Qt shutdown
+    except Exception:  # noqa: BLE001
+        pass
+    window.deleteLater()
     meter_repo.close()
     params_repo.close()
     sys.exit(exit_code)

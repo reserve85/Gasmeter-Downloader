@@ -193,7 +193,15 @@ def build_meter_series(
     for r in in_range:
         cal, z = factor_for_day(intervals, r.day)
         display = r.adjusted_value if unit == ViewUnit.M3 else energy_kwh(r.adjusted_value, cal, z)
-        series.append(MeterPoint(day=r.day, adjusted_value=r.adjusted_value, display_value=display))
+        series.append(
+            MeterPoint(
+                day=r.day,
+                adjusted_value=r.adjusted_value,
+                display_value=display,
+                source=r.source,
+                interpolated=r.source == Source.INTERPOLATED,
+            )
+        )
     return series
 
 
