@@ -1,40 +1,148 @@
-"""Optional encrypted GitHub token storage (Fernet, machine key file).
+"""GitHub-token encryption - never stored in clear text.
 
-The key file lives next to the app config so the token is not stored in the
-config in plaintext. This protects the token at rest against casual reading;
-it is not a substitute for OS-level credential protection.
+Mirrors the proven MusicSceneReleaser ``TokenService``: the Fernet key is
+**derived at runtime** with PBKDF2-HMAC-SHA256 (100 000 iterations) from a
+machine-specific identifier, so nothing secret is persisted besides the
+ciphertext itself - there is deliberately *no* key file on disk. A config
+copy that leaves this machine cannot be decrypted elsewhere.
+
+Legacy support: older builds stored a Fernet ``.gasmeter_token_key`` file next
+to the config. Its ciphertext keeps decrypting through a fallback path, and
+``reencrypt_if_legacy`` re-keys such values under the current machine-derived
+key so the old key file can be deleted.
 """
 
 from __future__ import annotations
 
+import base64
+import os
+import platform
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-KEY_FILENAME = ".gasmeter_token_key"
+KEY_FILENAME = ".gasmeter_token_key"  # legacy key file (removed after migration)
+
+#: App-unique salt - the derived key cannot be replayed against another app.
+_SALT = b"GasmeterDownloader_v1"
+_ITERATIONS = 100_000
+
+#: Every Fernet token starts with this marker; used to detect encrypted values
+#: and to migrate legacy clear-text tokens.
+_FERNET_PREFIX = "gAAAAA"
+
+#: One KDF run per process (the machine identity is stable), keeps the
+#: round-trip cheap for settings dialogs and update checks.
+_machine_fernet: Fernet | None = None
+
+
+def _get_machine_fernet() -> Fernet:
+    global _machine_fernet
+    if _machine_fernet is None:
+        machine_id = "|".join(
+            [
+                platform.node(),
+                os.environ.get("USERNAME") or os.environ.get("USER") or "",
+                platform.machine(),
+                platform.processor(),
+            ]
+        ).encode("utf-8")
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=_SALT,
+            iterations=_ITERATIONS,
+        )
+        _machine_fernet = Fernet(base64.urlsafe_b64encode(kdf.derive(machine_id)))
+    return _machine_fernet
 
 
 class TokenCrypto:
-    def __init__(self, key_file: str | Path):
-        self._key_file = Path(key_file)
+    """Encrypt/decrypt tokens with a machine-derived key.
 
-    def _key(self) -> bytes:
-        if self._key_file.exists():
-            return self._key_file.read_bytes().strip()
-        key = Fernet.generate_key()
-        self._key_file.parent.mkdir(parents=True, exist_ok=True)
-        self._key_file.write_bytes(key)
-        return key
+    ``key_file`` is accepted for backward compatibility only: it is consulted
+    as a *fallback* so ciphertext from the old key-file scheme keeps
+    decrypting until the value is re-saved (or re-keyed by
+    :meth:`reencrypt_if_legacy`). New ciphertext always uses the machine key.
+    """
 
+    def __init__(self, key_file: str | Path | None = None):
+        self._legacy_key_file = Path(key_file) if key_file else None
+
+    # -- public API ----------------------------------------------------------
     def encrypt(self, token: str) -> str:
-        f = Fernet(self._key())
-        return f.encrypt(token.encode("utf-8")).decode("ascii")
+        """Encrypt ``token``; ``""`` stays ``""`` (empty = no token)."""
+        if not token:
+            return ""
+        return _get_machine_fernet().encrypt(token.encode("utf-8")).decode("ascii")
 
-    def decrypt(self, encrypted: str | None) -> str | None:
+    def decrypt(self, encrypted: str | None) -> str:
+        """Plaintext, or ``""`` when missing/undecryptable.
+
+        A legacy *clear-text* value is handed back as-is (it is re-encrypted on
+        the next save - see ``SettingsUseCase`` and the startup migration).
+        """
+        if not encrypted:
+            return ""
+        if not self.is_encrypted(encrypted):
+            return encrypted
+        try:
+            return _get_machine_fernet().decrypt(encrypted.encode("ascii")).decode("utf-8")
+        except (InvalidToken, ValueError):
+            legacy = self._legacy_fernet()
+            if legacy is None:
+                return ""
+            try:
+                return legacy.decrypt(encrypted.encode("ascii")).decode("utf-8")
+            except (InvalidToken, ValueError):
+                return ""
+
+    def reencrypt_if_legacy(self, encrypted: str) -> str | None:
+        """Re-encrypt under the current key when ``encrypted`` uses the old key file.
+
+        Returns the new ciphertext, or ``None`` when the value is already
+        current-key crypto, empty, or undecryptable.
+        """
         if not encrypted:
             return None
+        if not self.is_encrypted(encrypted):
+            return self.encrypt(encrypted)
         try:
-            f = Fernet(self._key())
-            return f.decrypt(encrypted.encode("ascii")).decode("utf-8")
-        except (InvalidToken, ValueError, OSError):
+            plain = _get_machine_fernet().decrypt(encrypted.encode("ascii")).decode("utf-8")
+            return None  # already encrypted with the current machine key
+        except (InvalidToken, ValueError):
+            legacy = self._legacy_fernet()
+            if legacy is None:
+                return None
+            try:
+                plain = legacy.decrypt(encrypted.encode("ascii")).decode("utf-8")
+            except (InvalidToken, ValueError):
+                return None
+        return self.encrypt(plain)
+
+    @staticmethod
+    def is_encrypted(value: str | None) -> bool:
+        """``True`` when ``value`` looks like Fernet ciphertext (starts ``gAAAAA``)."""
+        return bool(value) and value.startswith(_FERNET_PREFIX)
+
+    def remove_legacy_key_file(self) -> None:
+        """Delete the obsolete key file (best-effort; missing file is fine)."""
+        if self._legacy_key_file is not None:
+            try:
+                self._legacy_key_file.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    # -- legacy fallback ------------------------------------------------------
+    def _legacy_fernet(self) -> Fernet | None:
+        if self._legacy_key_file is None:
+            return None
+        try:
+            raw = self._legacy_key_file.read_bytes().strip()
+            return Fernet(raw) if raw else None
+        except (OSError, ValueError, TypeError):
             return None

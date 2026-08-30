@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
     QHBoxLayout,
+    QLabel,
+    QProgressDialog,
+    QPushButton,
     QTextEdit,
+    QVBoxLayout,
 )
 from app.presentation.i18n import Translator
 
@@ -21,7 +23,7 @@ class UpdateDialog(QDialog):
         tr: Translator,
         current_version: str,
         check_fn: Callable[[], dict],
-        apply_fn: Callable[[str], bool],
+        apply_fn: Callable[..., bool],
         parent=None,
     ):
         super().__init__(parent)
@@ -75,15 +77,32 @@ class UpdateDialog(QDialog):
         url = self._check_result.get("download_url", "")
         if not url:
             return
+        # Live download progress (MusicSceneReleaser pattern): github_updater
+        # reports (bytes, total) through the callback; processEvents keeps the
+        # bar repainting while the blocking transfer runs.
+        progress = QProgressDialog(self._tr.t("update.downloading"), None, 0, 100, self)
+        progress.setWindowTitle(self._tr.t("update.title"))
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.setAutoClose(False)
+        progress.show()
+
+        def report(downloaded: int, total: int) -> None:
+            if total > 0:
+                progress.setValue(int(downloaded * 100 / total))
+            QApplication.processEvents()
+
         try:
-            ok = self._apply_fn(url)
+            ok = self._apply_fn(url, "", report)
         except Exception as exc:  # noqa: BLE001 - dev mode / packaging errors
+            progress.close()
             self._status.setText(self._tr.t("update.error", error=str(exc)))
             return
+        progress.setValue(100)
+        progress.close()
         if not ok:
             self._status.setText(self._tr.t("update.error", error="apply failed"))
             return
         self._status.setText(self._tr.t("update.restarted"))
-        from PyQt6.QtWidgets import QApplication
-
         QApplication.quit()

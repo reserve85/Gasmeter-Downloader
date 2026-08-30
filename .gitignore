@@ -16,10 +16,12 @@ build/
 *.db-shm
 *.db-wal
 config/app_config.yaml
+config/.gasmeter_token_key
 downloads/
 archive/
 gasmeter.lock
 GasmeterDownloader.exe
+implementation_plan.md
 
 # IDE
 .vscode/

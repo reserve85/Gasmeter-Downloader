@@ -10,6 +10,10 @@ class FileArchiver:
     def __init__(self, archive_dir: Path):
         self._archive_dir = Path(archive_dir)
 
+    def set_archive_dir(self, archive_dir: Path) -> None:
+        """Point the archiver at a new folder after a live settings change."""
+        self._archive_dir = Path(archive_dir)
+
     def archive(self, path: Path) -> Path | None:
         """Move ``path`` into the archive folder.
 

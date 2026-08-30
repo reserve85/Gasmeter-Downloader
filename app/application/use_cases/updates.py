@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 from app.domain.entities import LogCategory, LogLevel
+from app.infrastructure.config.security import TokenCrypto
 
 
 class CheckForUpdatesUseCase:
-    def __init__(self, port, settings, logger, token_crypto=None):
+    def __init__(self, port, settings, logger, token_crypto: TokenCrypto | None = None):
         self._port = port
         self._settings = settings
         self._logger = logger
-        self._crypto = token_crypto
+        self._crypto = token_crypto or TokenCrypto()
 
     def run(self) -> dict:
         stored = self._settings.get("update.token") or ""
-        if self._crypto is not None and stored:
-            token = self._crypto.decrypt(str(stored)) or ""
-        else:
-            token = stored
+        token = self._crypto.decrypt(str(stored)) if stored else ""
         result = self._port.check(token)
         status = "update available" if result.get("has_update") else "up to date"
         if result.get("error"):
@@ -36,9 +34,9 @@ class ApplyUpdateUseCase:
         self._port = port
         self._logger = logger
 
-    def run(self, download_url: str, token: str = "") -> bool:
+    def run(self, download_url: str, token: str = "", progress_callback=None) -> bool:
         self._logger.log(LogCategory.UPDATE, LogLevel.INFO, "Downloading update …")
-        path = self._port.download(download_url, token, None)
+        path = self._port.download(download_url, token, progress_callback)
         if not path:
             self._logger.log(LogCategory.UPDATE, LogLevel.ERROR, "Update download failed")
             return False
@@ -46,6 +44,16 @@ class ApplyUpdateUseCase:
         applied = self._port.apply(path)
         if applied:
             self._logger.log(LogCategory.UPDATE, LogLevel.INFO, "Update applied; restarting app")
+            # github_updater replaces the exe via a detached batch script; the app
+            # must then exit so the new version can take over on the next start.
+            try:
+                self._port.restart()
+            except Exception as exc:  # noqa: BLE001 - restart is best-effort
+                self._logger.log(
+                    LogCategory.UPDATE,
+                    LogLevel.WARNING,
+                    f"Update applied but restart failed: {exc}",
+                )
         else:
             self._logger.log(LogCategory.UPDATE, LogLevel.ERROR, "Update apply failed")
         return applied

@@ -120,11 +120,6 @@ def _prev_anchor(anchor: date, agg: Aggregation) -> date | None:
         return None  # ISO week 53 does not exist in the previous year
 
 
-def shift_previous(anchor: date, agg: Aggregation) -> date | None:
-    """Public version of the previous-year anchor mapping (used by charts too)."""
-    return _prev_anchor(anchor, agg)
-
-
 def previous_year_buckets(
     current: list[ConsumptionPoint],
     prev_buckets: list[ConsumptionPoint],
@@ -199,7 +194,6 @@ def build_meter_series(
                 adjusted_value=r.adjusted_value,
                 display_value=display,
                 source=r.source,
-                interpolated=r.source == Source.INTERPOLATED,
             )
         )
     return series
@@ -286,3 +280,60 @@ def build_trendline(
         r2=r2,
         series=DataSeries(name="trend", unit=unit, points=series),
     )
+
+
+def _year_shift(day: date, years: int) -> date:
+    """Shift a date by whole years; Feb 29 safely maps to Feb 28."""
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:
+        return day.replace(year=day.year + years, day=28)
+
+
+def year_projection(
+    daily: list[ConsumptionPoint],
+    today: date,
+    unit: ViewUnit,
+    projection_year: int,
+    use_previous_year: bool = False,
+    previous_daily: list[ConsumptionPoint] | None = None,
+) -> tuple[Decimal, Decimal, str]:
+    """Year consumption plus a full-year estimate (incl. the projected remainder).
+
+    Consumption is summed from Jan 1 of ``projection_year`` up to
+    ``min(today, Dec 31)``. The remainder is extrapolated from the average
+    consumption per data day of the elapsed window:
+
+    - ``basis="current-year"`` uses the current window's own average;
+    - ``basis="previous-year"`` uses the previous year's same-window average
+      when ``use_previous_year`` is set and such data exists.
+
+    Returns ``(year_consumed, year_projection, basis)``; an empty or future
+    window yields ``(0, Decimal("0"), "")``.
+    """
+    year_start = date(projection_year, 1, 1)
+    year_end = date(projection_year, 12, 31)
+    if today < year_start:
+        return Decimal("0"), Decimal("0"), ""
+
+    elapsed_end = min(today, year_end)
+    in_window = [p for p in daily if year_start <= p.day <= elapsed_end]
+    consumed = sum((point_value(p, unit) for p in in_window), Decimal("0"))
+    if not in_window:
+        return consumed, Decimal("0"), ""
+
+    remaining_days = max(0, (year_end - elapsed_end).days)
+
+    if use_previous_year and previous_daily:
+        prev_start = _year_shift(year_start, -1)
+        prev_end = _year_shift(elapsed_end, -1)
+        prev_window = [p for p in previous_daily if prev_start <= p.day <= prev_end]
+        if prev_window:
+            prev_total = sum((point_value(p, unit) for p in prev_window), Decimal("0"))
+            avg = prev_total / Decimal(len(prev_window))
+            remainder = _q(avg * Decimal(remaining_days))
+            return _q(consumed), _q(consumed + remainder), "previous-year"
+
+    avg = consumed / Decimal(len(in_window))
+    remainder = _q(avg * Decimal(remaining_days))
+    return _q(consumed), _q(consumed + remainder), "current-year"

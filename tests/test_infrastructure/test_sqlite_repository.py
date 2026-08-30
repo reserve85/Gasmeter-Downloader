@@ -20,6 +20,18 @@ def test_round_trip(sqlite_db):
     repo.close()
 
 
+def test_first_and_latest_reading_day(sqlite_db):
+    repo = SqliteMeterRepository(sqlite_db)
+    assert repo.first_reading_day() is None
+    assert repo.latest_reading_day() is None
+    repo.save_import(date(2025, 12, 31), Decimal("100"))
+    repo.save_import(date(2026, 1, 3), Decimal("104"))
+    repo.save_import(date(2026, 1, 1), Decimal("102"))
+    assert repo.first_reading_day() == date(2025, 12, 31)
+    assert repo.latest_reading_day() == date(2026, 1, 3)
+    repo.close()
+
+
 def test_save_import_manual_backfill(sqlite_db):
     repo = SqliteMeterRepository(sqlite_db)
     repo.save_manual(date(2026, 1, 1), Decimal("999"))

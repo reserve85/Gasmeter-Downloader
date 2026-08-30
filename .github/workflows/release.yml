@@ -5,6 +5,14 @@ on:
     tags:
       - "v*"
 
+# Cancel a superseded build if the tag is re-pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -13,18 +21,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Write version from tag
+      - name: Get version from tag
+        id: version
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          Set-Content app/_version.py "__version__ = `"$version`""
-          Write-Host "Building version $version"
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          "__version__ = `"$ver`"" | Out-File -Encoding utf8 app/_version.py
+          Write-Host "Building version $ver"
 
       - name: Run tests
         run: python -m pytest tests/ -q
@@ -32,15 +43,31 @@ jobs:
           QT_QPA_PLATFORM: offscreen
 
       - name: Build one-file exe
-        run: pyinstaller --onefile --windowed --name GasmeterDownloader --hidden-import PyQt6.QtCharts --hidden-import github_updater app/main.py
+        run: pyinstaller --onefile --windowed --name GasmeterDownloader --icon app/resources/Icon.ico --add-data "app/resources;app/resources" --hidden-import matplotlib.backends.backend_qtagg --hidden-import github_updater app/main.py
+
+      - name: Verify executable exists
+        run: |
+          if (!(Test-Path "dist\GasmeterDownloader.exe")) { exit 1 }
+          Write-Output "Executable size: $((Get-Item 'dist\GasmeterDownloader.exe').Length / 1MB) MB"
 
       - name: Create zip
-        run: Compress-Archive -Path dist\GasmeterDownloader.exe -DestinationPath dist\GasmeterDownloader.zip -Force
+        run: Compress-Archive -Path dist\GasmeterDownloader.exe -DestinationPath dist\GasmeterDownloader-v${{ steps.version.outputs.VERSION }}.zip -Force
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/GasmeterDownloader.exe
-            dist/GasmeterDownloader.zip
+            dist/GasmeterDownloader-v${{ steps.version.outputs.VERSION }}.zip
           generate_release_notes: true
+          name: "Gasmeter Downloader v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Gasmeter Downloader v${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+            1. Download `GasmeterDownloader.exe` or the `.zip`
+            2. Extract to any folder
+            3. Run `GasmeterDownloader.exe`
+
+            ### Changes
+            See auto-generated release notes below.

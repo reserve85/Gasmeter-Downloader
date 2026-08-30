@@ -7,25 +7,30 @@ from decimal import Decimal
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
-from app.domain.entities import Dashboard, Source, ViewUnit
+from app.domain.entities import Aggregation, Dashboard, Source, ViewUnit
 from app.presentation.i18n import Translator
 
-_COLUMNS = ("date", "import", "interpolated", "modified", "source", "restore")
+_COLUMNS = ("date", "import", "interpolated", "modified", "source", "daily_m3", "daily_kwh", "restore")
 
 
 class MeterTableModel(QAbstractTableModel):
-    """Columns: Date, Import, Interpolated, Modified, Source (unit-aware display)."""
+    """Columns: Date, Import, Interpolated, Modified, Source, Daily use m³/kWh."""
 
     def __init__(self, tr: Translator, parent=None):
         super().__init__(parent)
         self._tr = tr
         self._rows: list[tuple[date, Decimal | None, Decimal | None, Decimal, Source]] = []
         self._dashboard: Dashboard | None = None
+        self._daily_by_day: dict[date, object] = {}
 
     def set_dashboard(self, dashboard: Dashboard) -> None:
         self.beginResetModel()
         self._dashboard = dashboard
         self._rows = dashboard.table_rows if dashboard else []
+        self._daily_by_day = {
+            point.day: point
+            for point in dashboard.consumption.get(Aggregation.DAILY, [])
+        } if dashboard else {}
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
@@ -44,6 +49,8 @@ class MeterTableModel(QAbstractTableModel):
                 "interpolated": "table.interpolated_value",
                 "modified": "table.modified_value",
                 "source": "table.source",
+                "daily_m3": "table.daily_m3",
+                "daily_kwh": "table.daily_kwh",
                 "restore": "table.restore",
             }[_COLUMNS[section]]
             return self._tr.t(key)
@@ -61,9 +68,17 @@ class MeterTableModel(QAbstractTableModel):
                 return self._tr.t(f"source.{row[4].value}")
             if col == "restore":
                 return ""
+            if col in ("daily_m3", "daily_kwh"):
+                point = self._daily_by_day.get(row[0])
+                if point is None:
+                    return "–"
+                value = point.volume_m3 if col == "daily_m3" else point.energy_kwh
+                return self._tr.format_number(value)
             value = {"import": row[1], "interpolated": row[2], "modified": row[3]}[col]
             return self._format(value, row[0])
-        if role == Qt.ItemDataRole.TextAlignmentRole and col in ("import", "interpolated", "modified"):
+        if role == Qt.ItemDataRole.TextAlignmentRole and col in (
+            "import", "interpolated", "modified", "daily_m3", "daily_kwh"
+        ):
             return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         if role == Qt.ItemDataRole.UserRole:
             return row  # full row for the table view (edit/restore)

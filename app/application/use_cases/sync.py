@@ -89,7 +89,6 @@ class SyncMissingLogfilesUseCase:
     def __init__(
         self,
         repo,
-        params_repo,
         source,
         parser,
         archiver,
@@ -98,13 +97,16 @@ class SyncMissingLogfilesUseCase:
         clock,
     ):
         self._repo = repo
-        self._params_repo = params_repo
         self._source = source
         self._parser = parser
         self._archiver = archiver
         self._settings = settings
         self._logger = logger
         self._clock = clock
+
+    def set_source(self, source) -> None:
+        """Swap the device source after a live settings change (e.g. new IP)."""
+        self._source = source
 
     def run(self) -> SyncResult:
         today = self._clock.today()
@@ -213,13 +215,11 @@ class SyncMissingLogfilesUseCase:
 class ArchiveImportUseCase:
     """Import user-selected logfiles (archive, downloads/, USB, …) at any date."""
 
-    def __init__(self, repo, params_repo, parser, archiver, logger, clock):
+    def __init__(self, repo, parser, archiver, logger):
         self._repo = repo
-        self._params_repo = params_repo
         self._parser = parser
         self._archiver = archiver
         self._logger = logger
-        self._clock = clock
 
     def run(self, files: list[Path]) -> SyncResult:
         imported: list[ImportOutcome] = []

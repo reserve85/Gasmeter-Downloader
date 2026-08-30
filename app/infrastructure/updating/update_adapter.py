@@ -3,6 +3,10 @@
 The shared ``github_updater`` package (Python_Units) is used **only** for the
 application self-update. ``apply`` is guarded by ``sys.frozen`` so running from
 source never attempts an exe replacement (dev mode -> False + INFO log).
+
+Note: the empty-token anonymous update check is fixed in Python_Units
+(v0.2.0+); this adapter deliberately passes whatever token (or empty string)
+through so public-repo checks work without configuration.
 """
 
 from __future__ import annotations

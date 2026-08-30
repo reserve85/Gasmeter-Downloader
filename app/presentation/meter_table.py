@@ -33,8 +33,9 @@ class MeterTableView(QTableView):
 
     def _refresh_buttons(self) -> None:
         self.setUpdatesEnabled(False)
+        restore_col = self.model().columnCount() - 1
         for row in range(self.model().rowCount()):
-            index = self.model().index(row, 5)
+            index = self.model().index(row, restore_col)
             button = QPushButton(self._tr.t("table.restore"))
             day = self.model()._rows[row][0]  # noqa: SLF001
             button.clicked.connect(lambda _=False, d=day: self.restore_day.emit(d))

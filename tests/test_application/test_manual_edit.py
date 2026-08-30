@@ -49,3 +49,29 @@ def test_manual_edit_triggers_reinterpolation(fake_repo, logger):
 
     assert fake_repo.get_reading(date(2026, 1, 2)).adjusted_value == Decimal("116.667")
     assert fake_repo.get_reading(date(2026, 1, 3)).adjusted_value == Decimal("123.333")
+
+
+def test_manual_edit_rejects_value_below_previous(fake_repo, logger):
+    fake_repo.save_import(date(2026, 1, 1), Decimal("100"))
+    fake_repo.save_import(date(2026, 1, 2), Decimal("102"))
+    use_case = ManualEditUseCase(fake_repo, logger)
+    with pytest.raises(ValueError):
+        use_case.run(ManualEditRequest(day=date(2026, 1, 2), value=Decimal("99")))
+    # nothing persisted
+    assert fake_repo.get_reading(date(2026, 1, 2)).adjusted_value == Decimal("102")
+
+
+def test_manual_edit_rejects_value_above_next(fake_repo, logger):
+    fake_repo.save_import(date(2026, 1, 1), Decimal("100"))
+    fake_repo.save_import(date(2026, 1, 2), Decimal("102"))
+    use_case = ManualEditUseCase(fake_repo, logger)
+    with pytest.raises(ValueError):
+        use_case.run(ManualEditRequest(day=date(2026, 1, 1), value=Decimal("103")))
+
+
+def test_manual_edit_equal_neighbors_allowed(fake_repo, logger):
+    fake_repo.save_import(date(2026, 1, 1), Decimal("100"))
+    fake_repo.save_import(date(2026, 1, 2), Decimal("100"))
+    use_case = ManualEditUseCase(fake_repo, logger)
+    result = use_case.run(ManualEditRequest(day=date(2026, 1, 1), value=Decimal("100")))
+    assert result.adjusted_value == Decimal("100")

@@ -14,14 +14,20 @@ from __future__ import annotations
 
 import sys
 import traceback
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+
+#: Short delay before the startup update check so the window is fully drawn
+#: and the status bar shows "Ready" first (mirrors MusicSceneReleaser).
+_UPDATE_CHECK_DELAY_MS = 2000
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from PyQt6.QtCore import QLockFile  # noqa: E402
+from PyQt6.QtCore import QLockFile, QTimer  # noqa: E402
+from PyQt6.QtGui import QIcon  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from app import __version__
@@ -37,7 +43,7 @@ from app.infrastructure.clock import SystemClock
 from app.infrastructure.config.config_repository import YamlAppSettings
 from app.infrastructure.config.security import TokenCrypto
 from app.infrastructure.filesystem.file_archiver import FileArchiver
-from app.infrastructure.filesystem.paths import base_dir, default_dirs, ensure_dirs
+from app.infrastructure.filesystem.paths import base_dir, default_dirs, ensure_dirs, icon_path
 from app.infrastructure.logging.app_logger import AppLogger
 from app.infrastructure.parsing.logfile_parser import LogfileParser
 from app.infrastructure.persistence.sqlite_gas_parameter_repository import SqliteGasParameterRepository
@@ -77,24 +83,88 @@ def _windows_primary_language() -> int | None:
         return None
 
 
-def open_database(settings, db_path):
-    """Open SQLite repositories (settings unused; kept for interface clarity)."""
+def open_database(db_path):
+    """Open SQLite repositories."""
     return SqliteMeterRepository(db_path), SqliteGasParameterRepository(db_path)
 
 
+def _migrate_legacy_token(settings, crypto, logger) -> None:
+    """Guarantee ``update.token`` is never stored in clear text.
+
+    Older builds could leave a plain-text token or the obsolete
+    ``.gasmeter_token_key`` ciphertext in the config. Both are migrated to the
+    current machine-derived encryption and the key file is removed.
+    """
+    raw = settings.get("update.token")
+    if not raw:
+        crypto.remove_legacy_key_file()
+        return
+    if not TokenCrypto.is_encrypted(str(raw)):
+        settings.set("update.token", crypto.encrypt(str(raw)))
+        logger.log(
+            LogCategory.SETTINGS,
+            LogLevel.WARNING,
+            "Migrated GitHub token to encrypted storage (was stored in clear text)",
+        )
+    else:
+        rekeyed = crypto.reencrypt_if_legacy(str(raw))
+        if rekeyed is not None:
+            settings.set("update.token", rekeyed)
+            logger.log(
+                LogCategory.SETTINGS,
+                LogLevel.INFO,
+                "Re-encrypted GitHub token with current machine key",
+            )
+    crypto.remove_legacy_key_file()
+
+
 def seed_gas_parameters(params_repo, settings, meter_repo) -> None:
-    if params_repo.all_intervals():
+    """Guarantee gas-parameter coverage from the first stored logfile on.
+
+    Runs at startup and repairs the existing state:
+    - no interval at all      -> create ``(first_reading_day, open)``;
+    - earliest interval starts AFTER the first logfile -> prepend a leading
+      interval so coverage reaches back to the very first day;
+    - the last interval is bounded but readings exist after its end -> reopen
+      it so ``bis heute`` stays covered.
+    """
+    intervals = params_repo.all_intervals()
+    first_day = meter_repo.first_reading_day() or meter_repo.latest_reading_day()
+    if first_day is None:
         return
-    earliest = meter_repo.latest_reading_day()
-    if earliest is None:
+    default_cal = Decimal(str(settings.get("gas.default_calorific", 11.342)))
+    default_z = Decimal(str(settings.get("gas.default_z_value", 0.9589)))
+
+    if not intervals:
+        params_repo.upsert_interval(
+            GasParameterInterval(first_day, None, default_cal, default_z)
+        )
         return
-    interval = GasParameterInterval(
-        valid_from=earliest,
-        valid_to=None,
-        calorific_value=Decimal(str(settings.get("gas.default_calorific", 11.342))),
-        z_value=Decimal(str(settings.get("gas.default_z_value", 0.9589))),
-    )
-    params_repo.upsert_interval(interval)
+
+    earliest = intervals[0]
+    if earliest.valid_from > first_day:
+        params_repo.upsert_interval(
+            GasParameterInterval(
+                valid_from=first_day,
+                valid_to=earliest.valid_from - timedelta(days=1),
+                calorific_value=default_cal,
+                z_value=default_z,
+            )
+        )
+    latest = meter_repo.latest_reading_day()
+    last = intervals[-1]
+    if latest is not None and last.valid_to is not None and last.valid_to < latest:
+        # the PK is (valid_from, valid_to): an open-ended row is a DIFFERENT
+        # key than the bounded one, so delete first, then insert the open row.
+        params_repo.delete_interval(last.valid_from, last.valid_to)
+        params_repo.upsert_interval(
+            GasParameterInterval(
+                valid_from=last.valid_from,
+                valid_to=None,
+                calorific_value=last.calorific_value,
+                z_value=last.z_value,
+            )
+        )
 
 
 def build_update_service() -> GithubUpdateAdapter:
@@ -117,9 +187,15 @@ def main() -> None:
     logger.log(LogCategory.STARTUP, LogLevel.DEBUG, f"Base dir: {base_dir()}")
 
     theme = WindowsTheme(app)
+    theme.set_mode(str(settings.get("theme.mode", "auto")))
+
+    # application icon (title bar, taskbar, dialogs)
+    icon = QIcon(str(icon_path()))
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     db_path = settings.get("paths.database")
-    meter_repo, params_repo = open_database(settings, db_path)
+    meter_repo, params_repo = open_database(db_path)
     seed_gas_parameters(params_repo, settings, meter_repo)
 
     parser = LogfileParser()
@@ -129,11 +205,12 @@ def main() -> None:
     update_adapter = build_update_service()
     update_adapter.clean_old_files()
     token_crypto = TokenCrypto(dirs["config"] / ".gasmeter_token_key")
+    _migrate_legacy_token(settings, token_crypto, logger)
 
     sync_use_case = SyncMissingLogfilesUseCase(
-        meter_repo, params_repo, client, parser, archiver, settings, logger, clock
+        meter_repo, client, parser, archiver, settings, logger, clock
     )
-    archive_use_case = ArchiveImportUseCase(meter_repo, params_repo, parser, archiver, logger, clock)
+    archive_use_case = ArchiveImportUseCase(meter_repo, parser, archiver, logger)
     manual_use_case = ManualEditUseCase(meter_repo, logger)
     restore_use_case = RestoreValueUseCase(meter_repo, logger)
     settings_use_case = SettingsUseCase(settings, logger, token_crypto)
@@ -156,8 +233,10 @@ def main() -> None:
         theme=theme,
         app=app,
         repo=meter_repo,
+        archiver=archiver,
         version=__version__,
         controller=controller,
+        query_use_case=query_use_case,
         sync_use_case=sync_use_case,
         archive_import_use_case=archive_use_case,
         manual_edit_use_case=manual_use_case,
@@ -170,6 +249,12 @@ def main() -> None:
 
     window = MainWindow(services)
     window.show()
+
+    if settings.get("device.auto_fetch_on_startup", False):
+        QTimer.singleShot(0, window.trigger_startup_sync)
+    # update check shortly after the window is shown (MusicSceneReleaser pattern);
+    # works without a token because the repo is public.
+    QTimer.singleShot(_UPDATE_CHECK_DELAY_MS, window.trigger_startup_update_check)
 
     def _excepthook(exc_type, exc_value, exc_tb):
         logger.log(

@@ -1,5 +1,5 @@
 PyQt6>=6.6.0          # GUI toolkit
-PyQt6-Charts>=6.6.0   # QChart / QtCharts
+matplotlib>=3.11      # all diagrams (labels, hovers, clicks) - QtCharts removed
 github-updater @ git+https://github.com/reserve85/Python_Units.git   # self-update only
 cryptography>=41.0.0  # optional encrypted GitHub token
 pyyaml>=6.0           # app config YAML

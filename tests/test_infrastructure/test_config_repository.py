@@ -47,3 +47,39 @@ def test_missing_keys_merged_on_load(tmp_path):
     settings = YamlAppSettings(config, base=tmp_path)
     assert settings.get("device.ip") == "10.0.0.5"
     assert settings.get("device.max_download_days") == DEFAULTS["device"]["max_download_days"]
+
+
+def test_new_keys_defaults(tmp_path):
+    settings = YamlAppSettings(tmp_path / "config" / "app_config.yaml", base=tmp_path)
+    assert settings.get("theme.mode") == "auto"
+    assert settings.get("device.auto_fetch_on_startup") is False
+
+
+def test_new_keys_roundtrip(tmp_path):
+    config = tmp_path / "config" / "app_config.yaml"
+    settings = YamlAppSettings(config, base=tmp_path)
+    settings.set("theme.mode", "dark")
+    settings.set("device.auto_fetch_on_startup", True)
+    reloaded = YamlAppSettings(config, base=tmp_path)
+    assert reloaded.get("theme.mode") == "dark"
+    assert reloaded.get("device.auto_fetch_on_startup") is True
+
+
+def test_save_falls_back_when_replace_is_locked(tmp_path, monkeypatch):
+    """WinError 5 on os.replace must not lose settings (direct-write fallback)."""
+    config = tmp_path / "config" / "app_config.yaml"
+    settings = YamlAppSettings(config, base=tmp_path)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    attempts = {"n": 0}
+
+    def _locked_replace(src, dst):
+        attempts["n"] += 1
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr("os.replace", _locked_replace)
+    settings.set("device.ip", "10.0.0.99")
+    assert attempts["n"] == 3  # atomic path exhausted
+    assert config.exists()
+    reloaded = YamlAppSettings(config, base=tmp_path)
+    assert reloaded.get("device.ip") == "10.0.0.99"

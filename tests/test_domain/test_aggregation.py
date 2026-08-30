@@ -15,6 +15,7 @@ from app.domain.aggregation import (
     linear_regression,
     previous_year_buckets,
     project_trend,
+    year_projection,
 )
 from app.domain.conversion import energy_kwh
 from app.domain.entities import (
@@ -163,3 +164,75 @@ def test_build_trendline_has_forecast():
     trend = build_trendline(points, ViewUnit.M3, horizon_days=5)
     assert trend is not None
     assert len(trend.series.points) == 7 + 5
+
+
+def _daily_range(start: date, end: date, volume_m3: str) -> list[ConsumptionPoint]:
+    points: list[ConsumptionPoint] = []
+    from datetime import timedelta
+
+    day = start
+    while day <= end:
+        points.append(_p(day.isoformat(), volume_m3))
+        day += timedelta(days=1)
+    return points
+
+
+def test_year_projection_full_year_no_remainder():
+    points = _daily_range(date(2026, 1, 1), date(2026, 12, 31), "2")
+    consumed, projection, basis = year_projection(
+        points, date(2026, 12, 31), ViewUnit.M3, 2026
+    )
+    assert consumed == Decimal("730")
+    assert projection == Decimal("730")
+    assert basis == "current-year"
+
+
+def test_year_projection_uses_elapsed_window():
+    points = _daily_range(date(2026, 1, 1), date(2026, 6, 30), "1")
+    consumed, projection, basis = year_projection(
+        points, date(2026, 6, 30), ViewUnit.M3, 2026
+    )
+    assert consumed == Decimal("181")
+    assert projection == Decimal("365")  # 181 + 184 remaining days * avg 1
+
+
+def test_year_projection_previous_year_basis():
+    current = _daily_range(date(2026, 1, 1), date(2026, 6, 30), "1")
+    previous = _daily_range(date(2025, 1, 1), date(2025, 6, 30), "2")
+    consumed, projection, basis = year_projection(
+        current, date(2026, 6, 30), ViewUnit.M3, 2026,
+        use_previous_year=True, previous_daily=previous,
+    )
+    assert basis == "previous-year"
+    assert projection == Decimal("549")  # 181 + 184 * 2
+
+
+def test_year_projection_falls_back_to_current_basis():
+    current = _daily_range(date(2026, 1, 1), date(2026, 6, 30), "1")
+    consumed, projection, basis = year_projection(
+        current, date(2026, 6, 30), ViewUnit.M3, 2026,
+        use_previous_year=True, previous_daily=[],
+    )
+    assert basis == "current-year"
+    assert projection == Decimal("365")
+
+
+def test_year_projection_empty_and_future():
+    assert year_projection([], date(2026, 6, 30), ViewUnit.M3, 2026) == (
+        Decimal("0"),
+        Decimal("0"),
+        "",
+    )
+    points = _daily_range(date(2026, 1, 1), date(2026, 6, 30), "1")
+    assert year_projection(points, date(2026, 1, 1), ViewUnit.M3, 2027) == (
+        Decimal("0"),
+        Decimal("0"),
+        "",
+    )
+
+
+def test_year_projection_kwh_unit():
+    points = _daily_range(date(2026, 1, 1), date(2026, 1, 1), "1")
+    consumed, projection, basis = year_projection(points, date(2026, 1, 1), ViewUnit.KWH, 2026)
+    assert consumed == energy_kwh(Decimal("1"), Decimal("11.342"), Decimal("0.9589"))
+    assert basis == "current-year"

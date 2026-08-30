@@ -147,8 +147,7 @@ class MeterPoint:
     day: date
     adjusted_value: Decimal  # meter progression from DB (m³)
     display_value: Decimal  # converted to current view unit
-    source: Source  # helps rendering interpolated spans dashed
-    interpolated: bool = False  # True when this reading came from interpolation
+    source: Source
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +157,10 @@ class KpiSummary:
     max_day: ConsumptionPoint | None
     interpolated_days_in_range: int
     latest_meter_value: Decimal | None
+    year_consumed: Decimal = Decimal("0")  # consumption since Jan 1 (selected unit)
+    year_projection: Decimal = Decimal("0")  # full-year estimate incl. remainder (selected unit)
+    projection_basis: str = ""  # "" | "current-year" | "previous-year"
+    projection_year: int = 0  # year being projected
 
 
 @dataclass(frozen=True, slots=True)

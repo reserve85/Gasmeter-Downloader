@@ -143,6 +143,9 @@ class FakeMeterRepository:
     def latest_reading_day(self) -> date | None:
         return max(self._data.keys()) if self._data else None
 
+    def first_reading_day(self) -> date | None:
+        return min(self._data.keys()) if self._data else None
+
 
 class FakeGasParamRepository:
     def __init__(self, intervals: list[GasParameterInterval] | None = None):

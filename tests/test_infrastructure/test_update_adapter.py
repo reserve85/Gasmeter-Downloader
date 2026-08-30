@@ -21,6 +21,22 @@ def test_check_uses_github_updater():
     fake_service.check_for_update.assert_called_once_with(token="ghp_x")
 
 
+def test_check_empty_token_passed_through():
+    """The adapter must not block an anonymous public-repo check (fixed upstream)."""
+    from app.infrastructure.updating.update_adapter import GithubUpdateAdapter
+
+    adapter = GithubUpdateAdapter()
+    fake_service = mock.MagicMock()
+    fake_service.check_for_update.return_value = {"has_update": True, "latest_version": "9.9.9"}
+    with mock.patch(
+        "app.infrastructure.updating.update_adapter._build_service",
+        return_value=fake_service,
+    ):
+        result = adapter.check("")
+    assert result["has_update"] is True
+    fake_service.check_for_update.assert_called_once_with(token="")
+
+
 def test_download_delegates():
     from app.infrastructure.updating.update_adapter import GithubUpdateAdapter
 

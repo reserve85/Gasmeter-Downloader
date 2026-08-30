@@ -30,6 +30,8 @@ class QueryRequest:
     aggregation: Aggregation = Aggregation.DAILY
     include_previous_year: bool = False
     with_trendline: bool = False
+    with_year_projection: bool = False
+    project_by_previous_year: bool = False
 
 
 @dataclass(frozen=True, slots=True)

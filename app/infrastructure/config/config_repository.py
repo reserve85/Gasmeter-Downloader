@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +21,16 @@ from app.domain.conversion import DEFAULT_CALORIFIC, DEFAULT_Z_VALUE
 #: Runtime defaults applied when a key is missing or on first run (nested).
 DEFAULTS: dict[str, Any] = {
     "app": {"language": "auto", "unit": "m³"},
-    "device": {"ip": "192.168.10.65", "max_download_days": 30},
+    "device": {
+        "ip": "192.168.10.65",
+        "max_download_days": 30,
+        "auto_fetch_on_startup": False,
+    },
     "paths": {"download": "downloads", "archive": "archive", "database": "gasmeter.db"},
     "gas": {"default_calorific": float(DEFAULT_CALORIFIC), "default_z_value": float(DEFAULT_Z_VALUE)},
     "update": {"token": None},
     "charts": {"trend_horizon": 30},
+    "theme": {"mode": "auto"},
     "window": {"width": 1100, "height": 720},
 }
 
@@ -34,6 +40,7 @@ DEFAULT_KEYS = [
     "app.unit",
     "device.ip",
     "device.max_download_days",
+    "device.auto_fetch_on_startup",
     "paths.download",
     "paths.archive",
     "paths.database",
@@ -41,6 +48,7 @@ DEFAULT_KEYS = [
     "gas.default_z_value",
     "update.token",
     "charts.trend_horizon",
+    "theme.mode",
     "window.width",
     "window.height",
 ]
@@ -110,19 +118,37 @@ class YamlAppSettings:
 
     def _save(self) -> None:
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=".app_config_", suffix=".tmp", dir=str(self._config_path.parent)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                yaml.safe_dump(self._data, fh, allow_unicode=True, sort_keys=False)
-            os.replace(tmp_name, self._config_path)
-        finally:
-            if os.path.exists(tmp_name):
+        # Windows sometimes holds the target file (editor/AV/indexer) so an atomic
+        # os.replace can raise WinError 5. We retry briefly and - as a last resort -
+        # write the file directly so settings always persist.
+        last_error: OSError | None = None
+        for _ in range(3):
+            tmp_name = ""
+            try:
+                fd, tmp_name = tempfile.mkstemp(
+                    prefix=".app_config_", suffix=".tmp", dir=str(self._config_path.parent)
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    yaml.safe_dump(self._data, fh, allow_unicode=True, sort_keys=False)
                 try:
-                    os.unlink(tmp_name)
-                except OSError:
-                    pass
+                    os.replace(tmp_name, self._config_path)
+                    return
+                except OSError as exc:
+                    last_error = exc
+            except OSError as exc:
+                last_error = exc
+            finally:
+                if tmp_name and os.path.exists(tmp_name):
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+            time.sleep(0.05)
+        try:
+            with open(self._config_path, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(self._data, fh, allow_unicode=True, sort_keys=False)
+        except OSError as exc:
+            raise OSError(f"Could not save settings {self._config_path}: {exc}") from (last_error or exc)
 
     def to_dict(self) -> dict:
         return {key: self.get(key, None) for key in DEFAULT_KEYS}

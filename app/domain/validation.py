@@ -52,6 +52,26 @@ def validate_reading_value(value: Decimal) -> bool:
         return False
 
 
+def validate_ascending_order(
+    prev_value: Decimal | None,
+    value: Decimal,
+    next_value: Decimal | None,
+) -> list[str]:
+    """A corrected meter value must stay non-decreasing between its neighbors.
+
+    The check is inclusive (a standing meter keeps equal readings valid).
+    A missing neighbor imposes no constraint.
+    """
+    if not validate_reading_value(value):
+        return ["Value must be a finite non-negative number"]
+    errors: list[str] = []
+    if prev_value is not None and value < prev_value:
+        errors.append(f"Value must be >= previous day ({prev_value})")
+    if next_value is not None and value > next_value:
+        errors.append(f"Value must be <= next day ({next_value})")
+    return errors
+
+
 _IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
@@ -69,6 +89,7 @@ _SETTINGS_KEYS = {
     "app.unit",
     "device.ip",
     "device.max_download_days",
+    "device.auto_fetch_on_startup",
     "paths.download",
     "paths.archive",
     "paths.database",
@@ -76,7 +97,33 @@ _SETTINGS_KEYS = {
     "gas.default_z_value",
     "update.token",
     "charts.trend_horizon",
+    "theme.mode",
 }
+
+_THEME_MODES = ("auto", "dark", "light")
+_BOOL_TRUE = {"true", "1", "yes"}
+_BOOL_FALSE = {"false", "0", "no"}
+
+
+def coerce_bool(value: Any) -> bool:
+    """Parse a boolean-ish settings value (bool, 'true'/'false', '1'/'0')."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _BOOL_TRUE:
+            return True
+        if text in _BOOL_FALSE:
+            return False
+    raise ValueError(f"Cannot interpret {value!r} as a boolean")
+
+
+def _is_bool(value: Any) -> bool:
+    try:
+        coerce_bool(value)
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def validate_settings_changes(changes: dict[str, Any]) -> dict[str, list[str]]:
@@ -107,4 +154,8 @@ def validate_settings_changes(changes: dict[str, Any]) -> dict[str, list[str]]:
                     raise ValueError
             except (TypeError, ValueError):
                 errors[key] = ["Must be an integer between 1 and 365"]
+        elif key == "theme.mode" and value not in _THEME_MODES:
+            errors[key] = [f"Must be one of: {', '.join(_THEME_MODES)}"]
+        elif key == "device.auto_fetch_on_startup" and not _is_bool(value):
+            errors[key] = ["Must be a boolean"]
     return errors

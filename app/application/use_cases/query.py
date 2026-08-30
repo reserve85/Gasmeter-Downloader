@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 
 from app.application.models import QueryRequest
@@ -12,6 +13,7 @@ from app.domain.aggregation import (
     compute_kpis,
     consumption_series,
     previous_year_buckets,
+    year_projection,
 )
 from app.domain.entities import (
     Aggregation,
@@ -52,13 +54,15 @@ class GetDashboardUseCase:
 
         daily_points = consumption_series(readings, start, end, unit, intervals)
         consumption = aggregate_all(daily_points)
+        self._daily_points = daily_points  # reused by the year-projection merge
 
         meter_series = build_meter_series(readings, start, end, unit, intervals)
 
         range_readings = [r for r in readings if start <= r.day <= end]
+        #: table shows the newest day on top (owner: "order by desc")
         table_rows = [
             (r.day, r.import_value, r.interpolated_value, r.adjusted_value, r.source)
-            for r in sorted(range_readings, key=lambda r: r.day)
+            for r in sorted(range_readings, key=lambda r: r.day, reverse=True)
         ]
         day_factors = {r.day: factor_for_day(intervals, r.day) for r in range_readings}
 
@@ -69,6 +73,8 @@ class GetDashboardUseCase:
             trendline = build_trendline(consumption[Aggregation.DAILY], unit, horizon)
 
         kpi = compute_kpis(daily_points, range_readings, unit, intervals)
+        if request.with_year_projection:
+            kpi = self._attach_year_projection(kpi, request, unit, intervals, end)
 
         self._logger.log(
             LogCategory.GUI,
@@ -98,6 +104,14 @@ class GetDashboardUseCase:
         end = self._clock.today()
         return end - timedelta(days=30), end
 
+    def first_reading_day(self) -> date | None:
+        """Earliest stored reading day; ``None`` while the database is empty."""
+        return self._repo.first_reading_day()
+
+    def last_reading_day(self) -> date | None:
+        """Latest stored reading day; ``None`` while the database is empty."""
+        return self._repo.latest_reading_day()
+
     def _build_previous_year(self, request, consumption, unit, intervals):
         if not request.include_previous_year:
             return None
@@ -120,3 +134,28 @@ class GetDashboardUseCase:
         if not any(out.values()):
             return None
         return out
+
+    def _attach_year_projection(self, kpi, request, unit, intervals, end):
+        """Fill the KPI year-consumption / year-projection fields for ``end.year``."""
+        projection_year = end.year
+        previous_daily = None
+        if request.project_by_previous_year:
+            prev_start = date(projection_year - 1, 1, 1)
+            prev_end = date(projection_year - 1, 12, 31)
+            prev_readings = self._repo.get_readings(prev_start - timedelta(days=1), prev_end)
+            previous_daily = consumption_series(prev_readings, prev_start, prev_end, unit, intervals)
+        consumed, projected, basis = year_projection(
+            self._daily_points,
+            self._clock.today(),
+            unit,
+            projection_year,
+            use_previous_year=request.project_by_previous_year,
+            previous_daily=previous_daily,
+        )
+        return replace(
+            kpi,
+            year_consumed=consumed,
+            year_projection=projected,
+            projection_basis=basis,
+            projection_year=projection_year,
+        )

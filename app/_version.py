@@ -1,3 +1,3 @@
 """Application version. CI overwrites this file at release build time."""
 
-__version__ = "0.0.0-dev"
+__version__ = "0.1.0"

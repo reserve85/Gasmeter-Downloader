@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from unittest import mock
 
-from app.infrastructure.filesystem.paths import PROJECT_ROOT, base_dir, default_dirs, ensure_dirs
+from app.infrastructure.filesystem.paths import (
+    PROJECT_ROOT,
+    base_dir,
+    default_dirs,
+    ensure_dirs,
+    icon_path,
+    resource_path,
+)
 
 
 def test_project_root_is_repo_root():
@@ -43,3 +50,16 @@ def test_ensure_dirs(tmp_path):
     ensure_dirs(dirs)
     for path in dirs.values():
         assert path.is_dir()
+
+
+def test_icon_path_points_to_existing_png():
+    icon = icon_path()
+    assert icon.name == "Icon.png"
+    assert icon.exists()
+    assert icon.suffix == ".png"
+
+
+def test_resource_path_uses_meipass_when_frozen():
+    fake = PROJECT_ROOT / "_MEIPASS"
+    with mock.patch("app.infrastructure.filesystem.paths.sys._MEIPASS", str(fake), create=True):
+        assert resource_path("Icon.png") == fake / "app" / "resources" / "Icon.png"

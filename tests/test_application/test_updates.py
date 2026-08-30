@@ -14,19 +14,22 @@ class FakeUpdatePort:
         self.download_result = "/tmp/update.exe"
         self.apply_result = True
         self.check_calls = 0
+        self.restarts = 0
+        self.progress_calls: list = []
 
     def check(self, token: str) -> dict:
         self.check_calls += 1
         return self.check_result
 
     def download(self, url: str, token: str, progress) -> str:
+        self.progress_calls.append(progress)
         return self.download_result
 
     def apply(self, path: str) -> bool:
         return self.apply_result
 
     def restart(self) -> None:
-        pass
+        self.restarts += 1
 
 
 def test_check_for_updates_up_to_date(logger):
@@ -61,6 +64,20 @@ def test_apply_update_full_flow(logger):
     port = FakeUpdatePort()
     use_case = ApplyUpdateUseCase(port, logger)
     assert use_case.run("http://x/a.exe", token="") is True
+    # github_updater contract: apply_update() must be followed by restart_app()
+    assert port.restarts == 1
+
+
+def test_apply_update_restart_failure_is_logged(logger):
+    port = FakeUpdatePort()
+
+    def boom():
+        raise RuntimeError("cannot exit")
+
+    port.restart = boom
+    use_case = ApplyUpdateUseCase(port, logger)
+    assert use_case.run("http://x/a.exe", token="") is True  # apply still succeeded
+    assert any("restart failed" in m for _, _, m in logger.events)
 
 
 def test_apply_update_failed_download(logger):
@@ -68,3 +85,11 @@ def test_apply_update_failed_download(logger):
     port.download_result = ""
     use_case = ApplyUpdateUseCase(port, logger)
     assert use_case.run("http://x/a.exe") is False
+
+
+def test_apply_update_forwards_progress_callback(logger):
+    port = FakeUpdatePort()
+    use_case = ApplyUpdateUseCase(port, logger)
+    callback = lambda downloaded, total: None  # noqa: E731
+    assert use_case.run("http://x/a.exe", token="", progress_callback=callback) is True
+    assert port.progress_calls == [callback]

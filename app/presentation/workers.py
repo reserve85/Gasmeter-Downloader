@@ -10,7 +10,6 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class SyncWorker(QThread):
     """Runs a blocking callable (sync / archive import) off the UI thread."""
 
-    progress = pyqtSignal(str)
     finished_result = pyqtSignal(object)  # SyncResult
     failed = pyqtSignal(str)
 

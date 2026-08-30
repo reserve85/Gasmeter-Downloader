@@ -7,7 +7,9 @@ from decimal import Decimal
 
 from app.domain.entities import GasParameterInterval
 from app.domain.validation import (
+    coerce_bool,
     parse_device_ip,
+    validate_ascending_order,
     validate_interval,
     validate_reading_value,
     validate_settings_changes,
@@ -75,3 +77,57 @@ def test_settings_changes_ip_and_days():
     assert errors == {}
     errors = validate_settings_changes({"unknown.key": 1})
     assert "unknown.key" in errors
+
+
+def test_settings_changes_theme_mode():
+    assert validate_settings_changes({"theme.mode": "auto"}) == {}
+    assert validate_settings_changes({"theme.mode": "dark"}) == {}
+    assert validate_settings_changes({"theme.mode": "light"}) == {}
+    assert "theme.mode" in validate_settings_changes({"theme.mode": "sepia"})
+
+
+def test_settings_changes_auto_fetch_bool():
+    assert validate_settings_changes({"device.auto_fetch_on_startup": True}) == {}
+    assert validate_settings_changes({"device.auto_fetch_on_startup": "true"}) == {}
+    assert validate_settings_changes({"device.auto_fetch_on_startup": "0"}) == {}
+    assert "device.auto_fetch_on_startup" in validate_settings_changes(
+        {"device.auto_fetch_on_startup": "maybe"}
+    )
+
+
+def test_coerce_bool():
+    assert coerce_bool(True) is True
+    assert coerce_bool(False) is False
+    assert coerce_bool("yes") is True
+    assert coerce_bool(" TRUE ") is True
+    assert coerce_bool("0") is False
+    try:
+        coerce_bool("nope")
+    except ValueError:
+        pass
+    else:  # pragma: no cover - the point of the test
+        raise AssertionError("coerce_bool should reject 'nope'")
+
+
+def test_ascending_order_between_neighbors():
+    assert validate_ascending_order(Decimal("100"), Decimal("101"), Decimal("102")) == []
+
+
+def test_ascending_order_inclusive_equal():
+    assert validate_ascending_order(Decimal("100"), Decimal("100"), Decimal("100")) == []
+
+
+def test_ascending_order_rejects_out_of_range():
+    errors = validate_ascending_order(Decimal("100"), Decimal("99"), Decimal("102"))
+    assert any("previous" in e for e in errors)
+    errors = validate_ascending_order(Decimal("100"), Decimal("103"), Decimal("102"))
+    assert any("next" in e for e in errors)
+
+
+def test_ascending_order_missing_neighbors_ok():
+    assert validate_ascending_order(None, Decimal("101"), None) == []
+    assert validate_ascending_order(Decimal("100"), Decimal("101"), None) == []
+
+
+def test_ascending_order_rejects_invalid_value():
+    assert validate_ascending_order(None, Decimal("-5"), None) != []

@@ -92,6 +92,12 @@ class SqliteMeterRepository:
         rows = conn.execute("SELECT day FROM meter_readings WHERE import_value IS NOT NULL").fetchall()
         return {date.fromisoformat(r["day"]) for r in rows}
 
+    def first_reading_day(self) -> date | None:
+        """Earliest stored reading day (the start anchor for the table default)."""
+        conn = self._connection()
+        row = conn.execute("SELECT MIN(day) AS day FROM meter_readings").fetchone()
+        return date.fromisoformat(row["day"]) if row and row["day"] else None
+
     def latest_reading_day(self) -> date | None:
         conn = self._connection()
         row = conn.execute("SELECT MAX(day) AS day FROM meter_readings").fetchone()

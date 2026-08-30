@@ -26,6 +26,21 @@ def default_dirs() -> dict[str, Path]:
     }
 
 
+def resource_path(name: str) -> Path:
+    """Absolute path of a packaged resource (``app/resources/<name>``).
+
+    PyInstaller bundles resources under ``sys._MEIPASS``; when running from
+    source the file lives in the repository tree.
+    """
+    base = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+    return base / "app" / "resources" / name
+
+
+def icon_path() -> Path:
+    """The application window icon (PNG)."""
+    return resource_path("Icon.png")
+
+
 def ensure_dirs(paths: dict[str, Path]) -> None:
     for key in ("download", "archive", "config"):
         paths[key].mkdir(parents=True, exist_ok=True)
