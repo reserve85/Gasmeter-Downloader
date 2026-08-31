@@ -1,6 +1,6 @@
 PyQt6>=6.6.0          # GUI toolkit
 matplotlib>=3.11      # all diagrams (labels, hovers, clicks) - QtCharts removed
-github-updater @ git+https://github.com/reserve85/github_updater.git@v1.1.1   # self-update only; v1.1.1 (renamed repo) enables anonymous public-repo checks
+github-updater @ git+https://github.com/reserve85/github_updater.git@v1.2.0   # self-update only; v1.2.0 = safe stage-first swap + typed API
 cryptography>=41.0.0  # optional encrypted GitHub token
 pyyaml>=6.0           # app config YAML
 pytest>=7.4.0         # dev
