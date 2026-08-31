@@ -1,11 +1,13 @@
 """UpdatePort adapter wrapping ``github_updater.UpdateService``.
 
-The shared ``github_updater`` package (Python_Units) is used **only** for the
-application self-update. ``apply`` is guarded by ``sys.frozen`` so running from
-source never attempts an exe replacement (dev mode -> False + INFO log).
+The shared ``github_updater`` package (reserve85/github_updater) is used
+**only** for the application self-update. ``apply`` is guarded by ``sys.frozen``
+so running from source never attempts an exe replacement (dev mode -> False +
+INFO log).
 
-Note: the empty-token anonymous update check is fixed in Python_Units
-(v0.2.0+); this adapter deliberately passes whatever token (or empty string)
+Note: the empty-token anonymous update check is fixed upstream (v0.2.0+, the
+package now lives at https://github.com/reserve85/github_updater, pinned to
+v1.1.0); this adapter deliberately passes whatever token (or empty string)
 through so public-repo checks work without configuration.
 """
 

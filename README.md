@@ -69,7 +69,7 @@ forward projection).
 
 - Python 3.11+ (Windows)
 - See `requirements.txt` (PyQt6, Matplotlib, `github-updater` from the
-  `Python_Units` git repo, pyyaml, cryptography; pytest/ruff for development)
+  `reserve85/github_updater` git repo, pyyaml, cryptography; pytest/ruff for development)
 
 ## Setup (development)
 

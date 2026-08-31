@@ -33,6 +33,7 @@ from app.presentation.mpl_charts import (
     MplRender,
     _HoverTarget,
     _COMPARE_COLORS,
+    _SERIES_COLOR,
     _bar_tolerances,
     _bar_value_labels,
     _date2num,
@@ -44,6 +45,21 @@ from app.presentation.mpl_charts import (
 
 _MONTH_COUNT = 12
 _CHART_MIN_HEIGHT = 200
+
+#: compare monthly bars: the LOWER year is blue on the LEFT, the HIGHER year
+#: green on the RIGHT (same green as the charts-tab balkendiagramm)
+_COMPARE_BAR_BLUE = _COMPARE_COLORS[1]  # same blue as the compare line charts
+
+
+def _compare_year_colors(year_a: int, year_b: int) -> tuple[str, str]:
+    """``(color_a, color_b)``: the HIGHER year is green, the LOWER year blue.
+
+    Used by ALL compare charts (bars + meter + usage lines) so the years keep
+    the same color everywhere, regardless of which slot (A/B) they sit in.
+    """
+    if year_a > year_b:
+        return _SERIES_COLOR, _COMPARE_BAR_BLUE
+    return _COMPARE_BAR_BLUE, _SERIES_COLOR
 
 
 class CompareTab(QWidget):
@@ -303,9 +319,10 @@ def _compare_meter_render(dash_a, dash_b, year_a: int, year_b: int, dark: bool, 
         all_xs: list[float] = []
         all_ys: list[float] = []
         series_data: list[tuple[list[float], list[float], str, str]] = []
+        color_a, color_b = _compare_year_colors(year_a, year_b)
         for dash, label, color in (
-            (dash_a, str(year_a), _COMPARE_COLORS[0]),
-            (dash_b, str(year_b), _COMPARE_COLORS[1]),
+            (dash_a, str(year_a), color_a),
+            (dash_b, str(year_b), color_b),
         ):
             points = dash.meter_series
             if not points:
@@ -368,9 +385,10 @@ def _compare_usage_render(dash_a, dash_b, year_a: int, year_b: int, agg: Aggrega
         all_ys: list[float] = []
         series_data: list[tuple[list[float], list[float], str, str]] = []
         unit = dash_a.unit
+        color_a, color_b = _compare_year_colors(year_a, year_b)
         for dash, label, color in (
-            (dash_a, str(year_a), _COMPARE_COLORS[0]),
-            (dash_b, str(year_b), _COMPARE_COLORS[1]),
+            (dash_a, str(year_a), color_a),
+            (dash_b, str(year_b), color_b),
         ):
             points = dash.consumption.get(agg, [])
             if not points:
@@ -426,23 +444,30 @@ def _compare_usage_render(dash_a, dash_b, year_a: int, year_b: int, agg: Aggrega
 def _compare_monthly_render(dash_a, dash_b, year_a: int, year_b: int, dark: bool, tr: Translator):
     """Two side-by-side bar sets (one per year) with per-bar month/year info.
 
-    Year A is drawn green on the RIGHT half of each category, year B blue on
-    the LEFT half (mirrors the pre-migration layout). Each bar gets its own
-    snap target at the *center of that bar*, so hovering over year A's half
-    always shows year A's month and over year B's half year B.
+    The LOWER year sits on the LEFT half of each category and is blue; the
+    HIGHER year sits on the RIGHT half and is green (same green as the
+    charts-tab monthly bars). Each bar gets its own snap target at the *center
+    of that bar*, so hovering over one year's half always shows that year's
+    month.
     """
     unit = dash_a.unit
     values_a, points_a = _monthly_values(dash_a, unit)
     values_b, points_b = _monthly_values(dash_b, unit)
-    # bar halves: year A on the right (+0.21), year B on the left (-0.21)
-    offsets = {0: 0.21, 1: -0.21}
+    # lower year -> LEFT (-0.21) blue, higher year -> RIGHT (+0.21) green
+    color_a, color_b = _compare_year_colors(year_a, year_b)
+    if year_a > year_b:
+        offset_a, offset_b = 0.21, -0.21
+    else:
+        offset_a, offset_b = -0.21, 0.21
 
     def build() -> MplRender:
         targets: list[_HoverTarget] = []
-        for set_index, (year, values, points) in enumerate(
-            ((year_a, values_a, points_a), (year_b, values_b, points_b))
+        year_offsets = {year_a: offset_a, year_b: offset_b}
+        for year, values, points in (
+            (year_a, values_a, points_a),
+            (year_b, values_b, points_b),
         ):
-            offset = offsets[set_index]
+            offset = year_offsets[year]
             for month in range(1, _MONTH_COUNT + 1):
                 value = values[month - 1]
                 if value <= 0:
@@ -454,18 +479,18 @@ def _compare_monthly_render(dash_a, dash_b, year_a: int, year_b: int, dark: bool
             _style_axes(ax, dark)
             xs = [m - 1 for m in range(1, _MONTH_COUNT + 1)]
             bars_a = ax.bar(
-                [x + offsets[0] for x in xs],
+                [x + offset_a for x in xs],
                 values_a,
                 width=0.4,
-                color=_COMPARE_COLORS[0],
+                color=color_a,
                 edgecolor="none",
                 label=str(year_a),
             )
             bars_b = ax.bar(
-                [x + offsets[1] for x in xs],
+                [x + offset_b for x in xs],
                 values_b,
                 width=0.4,
-                color=_COMPARE_COLORS[1],
+                color=color_b,
                 edgecolor="none",
                 label=str(year_b),
             )

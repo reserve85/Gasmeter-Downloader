@@ -461,7 +461,7 @@ def test_compare_tab_values_labeled_and_unit(qapp, fake_repo, gas_repo):
     labels = [t.get_text() for t in tab._monthly_view.axes.texts if t.get_text()]  # noqa: SLF001
     assert labels and all("m³" in text for text in labels)
     assert all("e+" not in text and "E+" not in text for text in labels)
-    # 2026 has consumption in January (year B drawn blue on the LEFT half)
+    # 2026 has consumption in January (year B = higher year, drawn green on the RIGHT half)
     assert tab._monthly_view.axes.containers[1].datavalues[0] > 0  # noqa: SLF001
     assert "m³" in tab._total_a_label.text()
 
@@ -538,7 +538,7 @@ def test_compare_tab_ignores_charts_filter(qapp, fake_repo, gas_repo):
 
 
 def test_compare_monthly_hover_reads_the_hovered_bar(qapp, fake_repo, gas_repo):
-    """Hover over the LEFT (blue, year B) and RIGHT (green, year A) Jan bars."""
+    """Hover over the LEFT (blue, lower year) and RIGHT (green, higher year) Jan bars."""
     _seed(fake_repo)
     tab = _compare_tab(fake_repo, gas_repo, tr=Translator("en"))
     tab._year_a.setValue(2025)  # noqa: SLF001
@@ -548,37 +548,118 @@ def test_compare_monthly_hover_reads_the_hovered_bar(qapp, fake_repo, gas_repo):
     qapp.processEvents()
     view = tab._monthly_view  # noqa: SLF001
 
-    # blue (2026) sits LEFT at x=-0.21, green (2025) RIGHT at x=+0.21
-    _drive(view, "motion_notify_event", -0.21, 2.0)
-    qapp.processEvents()
-    assert view._target is not None and "01/2026" in view._target.text  # noqa: SLF001
-    _drive(view, "motion_notify_event", 0.21, 1.5)
+    # blue 2025 (lower year) sits LEFT at x=-0.21, green 2026 (higher) RIGHT at x=+0.21
+    _drive(view, "motion_notify_event", -0.21, 1.5)
     qapp.processEvents()
     assert view._target is not None and "01/2025" in view._target.text  # noqa: SLF001
+    _drive(view, "motion_notify_event", 0.21, 2.0)
+    qapp.processEvents()
+    assert view._target is not None and "01/2026" in view._target.text  # noqa: SLF001
     tab.close()
     qapp.processEvents()
 
 
 def test_compare_monthly_bar_targets_pick_correct_year(qapp, fake_repo, gas_repo):
-    """Left (blue/2026) resolves to 01/2026, right (green/2025) to 01/2025."""
+    """Left (blue/2025) resolves to 01/2025, right (green/2026) to 01/2026."""
     _seed(fake_repo)
     tab = _compare_tab(fake_repo, gas_repo)
     tab._year_a.setValue(2025)  # noqa: SLF001
     tab._year_b.setValue(2026)  # noqa: SLF001
     targets = tab._monthly_view._targets  # noqa: SLF001
     y_tol = tab._monthly_view._y_tol  # noqa: SLF001
-    left = _bar_target_at(-0.1, 1.0, targets, y_tol)  # blue / 2026
-    right = _bar_target_at(0.1, 1.0, targets, y_tol)  # green / 2025
+    left = _bar_target_at(-0.1, 1.0, targets, y_tol)  # blue / 2025 (lower year)
+    right = _bar_target_at(0.1, 1.0, targets, y_tol)  # green / 2026 (higher year)
     assert left is not None and right is not None
-    assert "01/2026" in left.text
-    assert "01/2025" in right.text
+    assert "01/2025" in left.text
+    assert "01/2026" in right.text
     assert left is not right
 
 
-def test_compare_click_on_green_and_blue_bar(qapp, fake_repo, gas_repo):
-    """Owner scenario: CLICK the green (01/2025) then the blue (01/2026) bar.
+def test_compare_bar_chart_lower_blue_left_higher_green_right(qapp, fake_repo, gas_repo):
+    """Compare bars: LOWER year blue on the LEFT, HIGHER year green on the RIGHT."""
+    from matplotlib import colors as mcolors
 
-    The click must resolve the exact bar, show the info and highlight it.
+    from app.presentation.compare import _COMPARE_BAR_BLUE
+    from app.presentation.mpl_charts import _SERIES_COLOR
+
+    _seed(fake_repo)
+    tab = _compare_tab(fake_repo, gas_repo)
+    tab._year_a.setValue(2025)  # noqa: SLF001
+    tab._year_b.setValue(2026)  # noqa: SLF001
+
+    def bar_state():
+        containers = tab._monthly_view.axes.containers  # noqa: SLF001
+        assert len(containers) == 2
+        patch_a, patch_b = containers[0].patches[0], containers[1].patches[0]
+        return (
+            mcolors.to_hex(patch_a.get_facecolor()).lower(),
+            mcolors.to_hex(patch_b.get_facecolor()).lower(),
+            patch_a.get_x(),
+            patch_b.get_x(),
+        )
+
+    # year A = 2025 (lower) -> blue on the LEFT, year B = 2026 (higher) -> green on the RIGHT
+    color_a, color_b, x_a, x_b = bar_state()
+    assert color_a == _COMPARE_BAR_BLUE.lower()
+    assert color_b == _SERIES_COLOR.lower()
+    assert x_a < x_b, f"lower year must sit LEFT of the higher year ({x_a} vs {x_b})"
+
+    # swapping the slots must follow the year numbers, not the A/B slots
+    tab._year_a.setValue(2026)  # noqa: SLF001 - now year A is the higher year
+    tab._year_b.setValue(2025)  # noqa: SLF001
+    color_a, color_b, x_a, x_b = bar_state()
+    assert color_a == _SERIES_COLOR.lower()
+    assert color_b == _COMPARE_BAR_BLUE.lower()
+    assert x_a > x_b, f"higher year (in slot A) must sit RIGHT of the lower year ({x_a} vs {x_b})"
+    tab.close()
+    qapp.processEvents()
+
+
+def test_compare_line_charts_use_same_colors_as_bars(qapp, fake_repo, gas_repo):
+    """Meter + usage lines must carry the SAME colors as the bars (green = higher, blue = lower)."""
+    from matplotlib import colors as mcolors
+
+    from app.presentation.compare import _COMPARE_BAR_BLUE
+    from app.presentation.mpl_charts import _SERIES_COLOR
+
+    _seed(fake_repo)
+    tab = _compare_tab(fake_repo, gas_repo)
+    tab._year_a.setValue(2025)  # noqa: SLF001 - lower year
+    tab._year_b.setValue(2026)  # noqa: SLF001 - higher year
+
+    def line_colors(view):
+        lines = [ln for ln in view.axes.lines if isinstance(ln, Line2D)]
+        assert len(lines) == 2, "both years must be drawn"
+        return (
+            mcolors.to_hex(lines[0].get_color()).lower(),
+            mcolors.to_hex(lines[1].get_color()).lower(),
+        )
+
+    # year A = 2025 (lower) -> blue, year B = 2026 (higher) -> green
+    meter_a, meter_b = line_colors(tab._meter_view)  # noqa: SLF001
+    usage_a, usage_b = line_colors(tab._usage_view)  # noqa: SLF001
+    assert meter_a == _COMPARE_BAR_BLUE.lower()
+    assert meter_b == _SERIES_COLOR.lower()
+    assert usage_a == _COMPARE_BAR_BLUE.lower()
+    assert usage_b == _SERIES_COLOR.lower()
+
+    # swapping the slots must follow the year numbers, not the A/B slots
+    tab._year_a.setValue(2026)  # noqa: SLF001 - now year A is the higher year
+    tab._year_b.setValue(2025)  # noqa: SLF001
+    meter_a, meter_b = line_colors(tab._meter_view)  # noqa: SLF001
+    usage_a, usage_b = line_colors(tab._usage_view)  # noqa: SLF001
+    assert meter_a == _SERIES_COLOR.lower()
+    assert meter_b == _COMPARE_BAR_BLUE.lower()
+    assert usage_a == _SERIES_COLOR.lower()
+    assert usage_b == _COMPARE_BAR_BLUE.lower()
+    tab.close()
+    qapp.processEvents()
+
+
+def test_compare_click_on_blue_and_green_bar(qapp, fake_repo, gas_repo):
+    """Owner scenario: CLICK the blue (01/2025) then the green (01/2026) bar.
+
+    The click must resolve the exact bar and show the persistent info bubble.
     """
     _seed(fake_repo)
     tab = _compare_tab(fake_repo, gas_repo, tr=Translator("en"))
@@ -591,26 +672,23 @@ def test_compare_click_on_green_and_blue_bar(qapp, fake_repo, gas_repo):
     clicks = []
     view.set_click_logger(clicks.append)
 
-    def click_and_assert(xd: float, yd: float, expected: str, bar_x: float) -> None:
+    def click_and_assert(xd: float, yd: float, expected: str) -> None:
         _drive(view, "button_press_event", xd, yd, button=1)
         qapp.processEvents()
         assert view._target is not None
         assert view._target.text.splitlines()[0] == expected
         assert view._info.get_visible()  # noqa: SLF001
-        assert view._highlight.get_visible(), "clicked bar must be highlighted"
-        # the highlight must cover exactly the clicked bar's data-space rect
-        assert abs(view._highlight.get_x() - bar_x) < 1e-6  # noqa: SLF001
 
-    click_and_assert(0.21, 1.5, "01/2025", 0.01)  # green / year A (drawn RIGHT)
+    click_and_assert(-0.21, 1.5, "01/2025")  # blue / lower year A (drawn LEFT)
     assert clicks and "Chart click" in clicks[-1] and "01/2025" in clicks[-1]
-    click_and_assert(-0.21, 2.0, "01/2026", -0.41)  # blue / year B (drawn LEFT)
+    click_and_assert(0.21, 2.0, "01/2026")  # green / higher year B (drawn RIGHT)
     assert clicks and "Chart click" in clicks[-1] and "01/2026" in clicks[-1]
     tab.close()
     qapp.processEvents()
 
 
-def test_bar_hit_uses_drawn_bar_rects(qapp, fake_repo, gas_repo):
-    """Owner scenario: mouse over February must highlight FEBRUARY (no shift)."""
+def test_bar_hover_resolves_february_no_shift(qapp, fake_repo, gas_repo):
+    """Owner scenario: mouse over February must resolve FEBRUARY (no shift)."""
     fake_repo.save_import(date(2026, 1, 1), Decimal("100"))
     fake_repo.save_import(date(2026, 1, 2), Decimal("102"))
     fake_repo.save_import(date(2026, 2, 1), Decimal("110"))
@@ -627,23 +705,19 @@ def test_bar_hit_uses_drawn_bar_rects(qapp, fake_repo, gas_repo):
     qapp.processEvents()
     view = tab._monthly_view  # noqa: SLF001
 
-    # February green (2025) bar: right half of category 1 (x ~ 1.21)
-    _drive(view, "motion_notify_event", 1.21, 1.0)
+    # February 2025 (lower year) bar: left half of category 1 (x ~ 0.79)
+    _drive(view, "motion_notify_event", 0.79, 1.0)
     qapp.processEvents()
     assert view._target is not None and "02/2025" in view._target.text, (
         f"mouse over Feb resolved to "
         f"{view._target.text.splitlines()[0] if view._target else None!r}"
     )
-    assert view._highlight.get_visible()  # noqa: SLF001
-    # highlight must sit over the February green bar (x in [1.01, 1.41])
-    hx = view._highlight.get_x()  # noqa: SLF001
-    assert 1.01 <= hx <= 1.41, f"highlight at x={hx:.2f}"
+    assert view._info.get_visible()  # noqa: SLF001
 
-    # February blue (2026) bar: left half of category 1 (x ~ 0.79)
-    _drive(view, "motion_notify_event", 0.79, 1.0)
+    # February 2026 (higher year) bar: right half of category 1 (x ~ 1.21)
+    _drive(view, "motion_notify_event", 1.21, 1.0)
     qapp.processEvents()
     assert view._target is not None and "02/2026" in view._target.text
-    hx = view._highlight.get_x()  # noqa: SLF001
-    assert 0.59 <= hx <= 0.99, f"highlight at x={hx:.2f}"
+    assert view._info.get_visible()  # noqa: SLF001
     tab.close()
     qapp.processEvents()

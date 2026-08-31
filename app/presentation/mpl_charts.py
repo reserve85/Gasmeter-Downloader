@@ -21,11 +21,11 @@ import matplotlib
 
 matplotlib.use("QtAgg")
 
+from matplotlib import colors as mcolors  # noqa: E402
 from matplotlib import dates as mdates  # noqa: E402
 from matplotlib.axes import Axes  # noqa: E402
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
-from matplotlib.patches import Rectangle  # noqa: E402
 from matplotlib.text import Text  # noqa: E402
 from PyQt6.QtWidgets import QSizePolicy, QWidget  # noqa: E402
 
@@ -36,9 +36,8 @@ _BG_COLOR = {True: "#1E1E1E", False: "#FFFFFF"}
 _TEXT_COLOR = {True: "#E6E6E6", False: "#202020"}
 _GRID_COLOR = {True: "#3C3C3C", False: "#D0D0D0"}
 _SERIES_COLOR = "#2E7D32"  # main green line/bars
-_COMPARE_COLORS = ("#2E7D32", "#1565C0")  # year A green / year B blue
+_COMPARE_COLORS = ("#2E7D32", "#1565C0")  # compare palette: green (higher year) / blue (lower year)
 _TREND_COLOR = "#A00000"
-_HIGHLIGHT_COLOR = "#FFB300"
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,26 +128,6 @@ def _bar_target_at(vx: float, vy: float, targets: list[_HoverTarget], y_tol: flo
     return min(cat_targets, key=lambda t: abs(t.x - vx))
 
 
-def _bar_rect_at(ax: Axes, vx: float, vy: float, exclude: Rectangle | None = None) -> Rectangle | None:
-    """The drawn bar whose data-space rect contains ``(vx, vy)`` (or ``None``).
-
-    Because the highlight is itself a ``Rectangle`` in ``ax.patches``, it is
-    excluded explicitly so a live highlight can never be re-selected.
-    """
-    fudge = 1e-9
-    for patch in ax.patches:
-        if not isinstance(patch, Rectangle) or patch is exclude:
-            continue
-        left, bottom = patch.get_x(), patch.get_y()
-        width, height = patch.get_width(), patch.get_height()
-        if (
-            left - fudge <= vx <= left + width + fudge
-            and bottom - fudge <= vy <= bottom + height + fudge
-        ):
-            return patch
-    return None
-
-
 def _tooltip_text(day: date, meter_m3, delta_m3, delta_kwh, tr: Translator, monthly: bool = False) -> str:
     """Shared hover/click text: Datum / Zählerstand / Verbrauch (m³ + kWh)."""
     if monthly:
@@ -196,11 +175,13 @@ def _add_datetime_axes(ax: Axes, days: list[date], fmt: str, dark: bool) -> None
 
 
 def _bar_value_labels(ax: Axes, container, unit_text: str, dark: bool, tr: Translator) -> list[Text]:
-    """One white bold integer label per bar, centered inside the bar.
+    """One bold integer label per bar, centered inside the bar.
 
-    Zero/empty bars get no label; bars too small to hold the text get the label
-    *above* the bar in the theme text color (so light mode never shows white on
-    white). Labels are laid out in data space and never use scientific notation.
+    The inside label is white on dark bars (green/blue) and dark on bright bars
+    so it always stays readable. Zero/empty bars get no label; bars
+    too small to hold the text get the label *above* the bar in the theme text
+    color (so light mode never shows white on white). Labels are laid out in
+    data space and never use scientific notation.
     """
     texts: list[Text] = []
     values = list(container.datavalues) if container.datavalues is not None else []
@@ -208,6 +189,9 @@ def _bar_value_labels(ax: Axes, container, unit_text: str, dark: bool, tr: Trans
         if not value:
             continue
         label = f"{tr.format_number(Decimal(str(value)), decimals=0)} {unit_text}"
+        r, g, b, *_ = mcolors.to_rgba(patch.get_facecolor())
+        luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        label_color = "#202020" if luminance > 0.5 else "#FFFFFF"
         center_x = patch.get_x() + patch.get_width() / 2
         if patch.get_height() >= 12:
             text = ax.text(
@@ -216,7 +200,7 @@ def _bar_value_labels(ax: Axes, container, unit_text: str, dark: bool, tr: Trans
                 label,
                 ha="center",
                 va="center",
-                color="#FFFFFF",
+                color=label_color,
                 fontsize=8,
                 fontweight="bold",
                 zorder=10,
@@ -240,15 +224,14 @@ def _bar_value_labels(ax: Axes, container, unit_text: str, dark: bool, tr: Trans
 
 
 class MplChartCanvas(FigureCanvasQTAgg):
-    """One Matplotlib figure with working hover/click info + bar highlight.
+    """One Matplotlib figure with working hover/click info bubbles.
 
     Events come from the QtAgg backend: ``motion_notify_event`` (hover),
     ``button_press_event`` (click == hover, plus optional click logging) and
     ``figure_leave_event``. The info bubble is a Matplotlib ``Axes.annotate``
     artist that stays visible until the mouse moves away/leaves (no auto-hide;
-    the owner explicitly wants persistent info). Bars get a persistent orange
-    outline drawn over the *same* data-space rectangle that was hit, so mouse
-    position and highlight can never diverge.
+    the owner explicitly wants persistent info). No outline/frame is drawn over
+    the bars on hover or click (owner feedback: no yellow Rahmen).
     """
 
     def __init__(self, parent: QWidget | None = None):
@@ -265,7 +248,6 @@ class MplChartCanvas(FigureCanvasQTAgg):
         self._bar_hit = False
         self._target: _HoverTarget | None = None
         self._info: Text | None = None
-        self._highlight: Rectangle | None = None
         self._double_click_callback: Callable[[], None] | None = None
         self._click_logger: Callable[[str], None] | None = None
         self.mpl_connect("motion_notify_event", self._on_motion)
@@ -298,18 +280,6 @@ class MplChartCanvas(FigureCanvasQTAgg):
             fontsize=9,
             zorder=300,
             visible=False,
-        )
-        self._highlight = self.axes.add_patch(
-            Rectangle(
-                (0, 0),
-                0,
-                0,
-                fill=False,
-                edgecolor=_HIGHLIGHT_COLOR,
-                linewidth=2.5,
-                zorder=250,
-                visible=False,
-            )
         )
         self._hide()
         self.draw_idle()
@@ -378,27 +348,11 @@ class MplChartCanvas(FigureCanvasQTAgg):
             dy = -8 if fy > 0.8 else 10
             self._info.xytext = (dx, dy)
             self._info.set_visible(True)
-        self._update_highlight(xd, yd)
         self.draw_idle()
-
-    def _update_highlight(self, xd: float, yd: float) -> None:
-        if self._highlight is None:
-            return
-        rect = _bar_rect_at(self.axes, xd, yd, exclude=self._highlight) if self._bar_hit else None
-        if rect is None:
-            if self._highlight.get_visible():
-                self._highlight.set_visible(False)
-            return
-        self._highlight.set_xy((rect.get_x(), rect.get_y()))
-        self._highlight.set_width(rect.get_width())
-        self._highlight.set_height(rect.get_height())
-        self._highlight.set_visible(True)
 
     def _hide(self) -> None:
         if self._info is not None and self._info.get_visible():
             self._info.set_visible(False)
-        if self._highlight is not None and self._highlight.get_visible():
-            self._highlight.set_visible(False)
         self._target = None
 
 
