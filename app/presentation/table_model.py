@@ -7,10 +7,10 @@ from decimal import Decimal
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
-from app.domain.entities import Aggregation, Dashboard, Source, ViewUnit
+from app.domain.entities import Aggregation, Dashboard, Source
 from app.presentation.i18n import Translator
 
-_COLUMNS = ("date", "import", "interpolated", "modified", "source", "daily_m3", "daily_kwh", "restore")
+_COLUMNS = ("date", "import", "interpolated", "modified", "source", "daily_m3", "daily_kwh")
 
 
 class MeterTableModel(QAbstractTableModel):
@@ -51,7 +51,6 @@ class MeterTableModel(QAbstractTableModel):
                 "source": "table.source",
                 "daily_m3": "table.daily_m3",
                 "daily_kwh": "table.daily_kwh",
-                "restore": "table.restore",
             }[_COLUMNS[section]]
             return self._tr.t(key)
         return section + 1
@@ -66,8 +65,6 @@ class MeterTableModel(QAbstractTableModel):
                 return self._tr.format_date(row[0])
             if col == "source":
                 return self._tr.t(f"source.{row[4].value}")
-            if col == "restore":
-                return ""
             if col in ("daily_m3", "daily_kwh"):
                 point = self._daily_by_day.get(row[0])
                 if point is None:
@@ -84,12 +81,8 @@ class MeterTableModel(QAbstractTableModel):
             return row  # full row for the table view (edit/restore)
         return None
 
-    def _format(self, value: Decimal | None, day: date) -> str:
-        if self._dashboard is None or value is None:
+    def _format(self, value: Decimal | None, day: date) -> str:  # noqa: ARG002
+        """Always display in m³ — these are absolute meter readings."""
+        if value is None:
             return "–"
-        if self._dashboard.unit == ViewUnit.KWH:
-            cal, z = self._dashboard.day_factors.get(day, (Decimal("11.342"), Decimal("0.9589")))
-            converted = value * cal * z
-        else:
-            converted = value
-        return self._tr.format_number(converted)
+        return self._tr.format_number(value)

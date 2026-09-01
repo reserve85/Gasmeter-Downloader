@@ -47,10 +47,9 @@ def test_column_headers(qapp):
     headers = [
         model.headerData(i, Qt.Orientation.Horizontal) for i in range(model.columnCount())
     ]
-    assert headers[:5] == ["Date", "Import", "Interpolated", "Modified", "Source"]
+    assert headers[:5] == ["Date", "Import (m³)", "Interpolated (m³)", "Modified (m³)", "Source"]
     assert headers[5] == "Daily use (m³)"
     assert headers[6] == "Daily use (kWh)"
-    assert headers[7] == "Restore"
 
 
 def test_row_values_and_source(qapp):

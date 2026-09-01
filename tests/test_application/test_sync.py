@@ -149,3 +149,34 @@ def test_interpolation_runs_after_import(fake_repo, source, parser, archiver, lo
     assert middle is not None
     assert middle.source == Source.INTERPOLATED
     assert middle.adjusted_value == Decimal("120")
+
+
+def test_sync_imports_from_archive_instead_of_downloading(
+    fake_repo, source, parser, archiver, logger, clock, tmp_path
+):
+    """When the archive already has a file for a missing day, the sync imports
+    from the archive instead of downloading from the device — no duplicates."""
+    settings = {"device.max_download_days": 30, "paths.download": str(tmp_path / "downloads")}
+    day = date(2026, 8, 28)
+
+    # Simulate: archive already has the file (e.g. from a previous run).
+    archive_file = tmp_path / "archive" / f"data_{day.isoformat()}.csv"
+    archive_file.parent.mkdir()
+    archive_file.write_text("archived content")
+    archiver._store[archive_file.name] = archive_file
+
+    # Device also has it — but it should NOT be downloaded.
+    source.available.add(day)
+    source.payloads[day] = b"device content"
+    parser.add_csv(archive_file, day, Decimal("31163.63"))
+
+    result = _use_case(fake_repo, source, parser, archiver, logger, clock, settings).run()
+
+    # Imported from archive, not downloaded.
+    assert result.downloaded == []
+    assert result.imported[0].status == "imported"
+    assert day not in result.missing_on_device
+    assert fake_repo.get_reading(day) is not None
+    assert fake_repo.get_reading(day).import_value == Decimal("31163.63")
+    # The device was never contacted for this day.
+    assert day not in source.download_calls

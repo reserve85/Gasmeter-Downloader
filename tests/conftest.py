@@ -249,6 +249,13 @@ class FakeArchiver:
     def is_archived(self, path: Path) -> bool:
         return path.name in self._store
 
+    def find_by_date(self, day: date) -> Path | None:
+        prefix = f"data_{day.isoformat()}"
+        for name, path in self._store.items():
+            if prefix in name:
+                return path
+        return None
+
 
 class FakeSettings:
     def __init__(self, values: dict | None = None):

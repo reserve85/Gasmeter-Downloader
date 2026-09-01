@@ -33,6 +33,7 @@ from app.presentation.mpl_charts import (
     MplRender,
     _HoverTarget,
     _SERIES_COLOR,
+    _TEXT_COLOR,
     _TREND_COLOR,
     _add_datetime_axes,
     _bar_tolerances,
@@ -121,7 +122,7 @@ def _meter_chart_builder(points, daily, dark: bool, tr: Translator):
                 linewidth=1.5,
                 label=tr.t("charts.meter.title"),
             )
-            ax.legend(loc="best", fontsize=8, frameon=False)
+            ax.legend(loc="best", fontsize=8, frameon=False, labelcolor=_TEXT_COLOR[dark])
 
         return MplRender(draw=draw, targets=targets, x_tol=x_tol, y_tol=y_tol)
 
@@ -165,7 +166,7 @@ def _usage_chart_builder(dashboard: Dashboard, agg: Aggregation, trend_on: bool,
                 )
                 axis_days = axis_days + [p.day for p in trend_points]
             if points or (trend_on and dashboard.trendline is not None):
-                ax.legend(loc="best", fontsize=8, frameon=False)
+                ax.legend(loc="best", fontsize=8, frameon=False, labelcolor=_TEXT_COLOR[dark])
             _add_datetime_axes(ax, axis_days, fmt=x_format, dark=dark)
 
         return MplRender(draw=draw, targets=targets, x_tol=x_tol, y_tol=y_tol)

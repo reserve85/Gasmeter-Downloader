@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from PyQt6.QtCore import QModelIndex, Qt, pyqtSignal
-from PyQt6.QtWidgets import QAbstractItemView, QMenu, QPushButton, QTableView
+from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableView
 
 from app.presentation.table_model import MeterTableModel
 
@@ -25,22 +25,10 @@ class MeterTableView(QTableView):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
         self.doubleClicked.connect(self._on_double_click)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
     def set_model(self, model: MeterTableModel) -> None:
         self.setModel(model)
-        model.modelReset.connect(self._refresh_buttons)
-        self._refresh_buttons()
-
-    def _refresh_buttons(self) -> None:
-        self.setUpdatesEnabled(False)
-        restore_col = self.model().columnCount() - 1
-        for row in range(self.model().rowCount()):
-            index = self.model().index(row, restore_col)
-            button = QPushButton(self._tr.t("table.restore"))
-            day = self.model()._rows[row][0]  # noqa: SLF001
-            button.clicked.connect(lambda _=False, d=day: self.restore_day.emit(d))
-            self.setIndexWidget(index, button)
-        self.setUpdatesEnabled(True)
 
     def _on_double_click(self, index: QModelIndex) -> None:
         if not index.isValid():

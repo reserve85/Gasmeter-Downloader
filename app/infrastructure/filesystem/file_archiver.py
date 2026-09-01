@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from datetime import date
 from pathlib import Path
 
 
@@ -37,6 +38,21 @@ class FileArchiver:
         if p.resolve().parent == self._archive_dir.resolve():
             return True
         return (self._archive_dir / p.name).exists()
+
+    def find_by_date(self, day: date) -> Path | None:
+        """Return the first archived file whose name contains the day's ISO date.
+
+        Matches the device naming convention ``data_YYYY-MM-DD.csv``.  Returns
+        ``None`` when no matching file is found or the archive directory does
+        not exist yet.
+        """
+        if not self._archive_dir.is_dir():
+            return None
+        prefix = f"data_{day.isoformat()}"
+        for entry in sorted(self._archive_dir.iterdir()):
+            if entry.is_file() and prefix in entry.name:
+                return entry
+        return None
 
     def _unique_target(self, name: str) -> Path:
         candidate = self._archive_dir / name

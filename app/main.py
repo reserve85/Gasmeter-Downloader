@@ -248,7 +248,7 @@ def main() -> None:
     )
 
     window = MainWindow(services)
-    window.show()
+    window.showMaximized()
 
     if settings.get("device.auto_fetch_on_startup", False):
         QTimer.singleShot(0, window.trigger_startup_sync)

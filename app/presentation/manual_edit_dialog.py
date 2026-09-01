@@ -10,11 +10,13 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
 )
@@ -64,33 +66,56 @@ class ManualEditDialog(QDialog):
         form.addRow(tr.t("manual.prev_value"), prev_label)
         form.addRow(tr.t("manual.next_value"), next_label)
 
-        lower, upper = _allowed_range(prev_value, next_value)
+        self._lower, self._upper = _allowed_range(prev_value, next_value)
         self._spin = QDoubleSpinBox()
-        self._spin.setRange(lower, upper)
+        self._spin.setRange(0.0, _MAX_METER)
         self._spin.setDecimals(3)
+        self._spin.setMinimumWidth(160)
         self._spin.setValue(float(modified_value))
-        form.addRow(tr.t("manual.modified_label"), self._spin)
+
+        self._icon_label = QLabel("")
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        spin_row = QHBoxLayout()
+        spin_row.addWidget(self._spin)
+        spin_row.addWidget(self._icon_label)
+        form.addRow(tr.t("manual.modified_label"), spin_row)
         layout.addLayout(form)
 
-        if prev_value is not None or next_value is not None:
-            info = QLabel(
-                tr.t(
-                    "manual.ascending_error",
-                    prev=tr.format_number(lower),
-                    next=tr.format_number(upper),
-                )
-            )
-            info.setWordWrap(True)
-            layout.addWidget(info)
+        self._status_label = QLabel("")
+        self._status_label.setWordWrap(True)
+        layout.addWidget(self._status_label)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr.t("manual.ok"))
+        self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self._ok_button.setText(tr.t("manual.ok"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr.t("manual.cancel"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        self._spin.valueChanged.connect(self._validate)
+        self._validate()
+
+    def _validate(self) -> None:
+        v = self._spin.value()
+        in_range = self._lower <= v <= self._upper
+        self._ok_button.setEnabled(in_range)
+        if not in_range:
+            self._icon_label.setText("✗")
+            self._icon_label.setStyleSheet("color: #E53935; font-size: 16px; font-weight: bold;")
+            self._status_label.setText(
+                self._tr.t(
+                    "manual.ascending_error",
+                    prev=self._tr.format_number(self._lower),
+                    next=self._tr.format_number(self._upper),
+                )
+            )
+        else:
+            self._icon_label.setText("✓")
+            self._icon_label.setStyleSheet("color: #43A047; font-size: 16px; font-weight: bold;")
+            self._status_label.setText("")
 
     def value(self) -> Decimal:
         return Decimal(str(self._spin.value()))

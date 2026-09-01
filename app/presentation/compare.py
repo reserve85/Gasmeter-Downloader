@@ -28,12 +28,14 @@ from PyQt6.QtWidgets import (
 from app.application.models import QueryRequest
 from app.domain.conversion import point_value
 from app.domain.entities import Aggregation, ViewUnit
+from app.presentation.charts import BigChartDialog
 from app.presentation.i18n import Translator
 from app.presentation.mpl_charts import (
     MplRender,
     _HoverTarget,
     _COMPARE_COLORS,
     _SERIES_COLOR,
+    _TEXT_COLOR,
     _bar_tolerances,
     _bar_value_labels,
     _date2num,
@@ -75,6 +77,8 @@ class CompareTab(QWidget):
         self._agg = Aggregation.DAILY
         raw_unit = settings.get("app.unit", "m³")
         self._unit = ViewUnit.M3 if raw_unit == "m³" else ViewUnit.KWH
+
+        self._last_renders: dict[str, MplRender] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -164,6 +168,9 @@ class CompareTab(QWidget):
             view.set_click_logger(
                 lambda line: self._logger.log(LogCategory.GUI, LogLevel.INFO, line)
             )
+        self._meter_view.set_double_click_callback(lambda: self._open_big("meter"))
+        self._usage_view.set_double_click_callback(lambda: self._open_big("usage"))
+        self._monthly_view.set_double_click_callback(lambda: self._open_big("monthly"))
         self._empty_label = QLabel(self._tr.t("charts.empty"))
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.hide()
@@ -184,13 +191,12 @@ class CompareTab(QWidget):
         controller.charts_dashboard_changed.connect(self._on_controller_dashboard)
 
     def _on_controller_dashboard(self, dashboard) -> None:
-        if dashboard.unit == self._unit:
-            return
-        self._unit = dashboard.unit
-        self._unit_combo.blockSignals(True)
-        index = self._unit_combo.findData(dashboard.unit)
-        self._unit_combo.setCurrentIndex(index if index >= 0 else 0)
-        self._unit_combo.blockSignals(False)
+        if dashboard.unit != self._unit:
+            self._unit = dashboard.unit
+            self._unit_combo.blockSignals(True)
+            index = self._unit_combo.findData(dashboard.unit)
+            self._unit_combo.setCurrentIndex(index if index >= 0 else 0)
+            self._unit_combo.blockSignals(False)
         self._recompute()
 
     def _on_agg(self) -> None:
@@ -225,6 +231,19 @@ class CompareTab(QWidget):
         combo.blockSignals(False)
 
     # -- data / rendering ---------------------------------------------------------
+    def _open_big(self, key: str) -> None:
+        """Open the selected compare chart in a resizable big dialog."""
+        render = self._last_renders.get(key)
+        if render is None:
+            return
+        title_map = {
+            "meter": self._tr.t("charts.meter.title"),
+            "usage": self._tr.t("charts.usage.title"),
+            "monthly": self._tr.t("charts.monthly.title"),
+        }
+        title = self._tr.t("charts.big.title", title=title_map.get(key, key))
+        BigChartDialog(render, title, self._dark, self).exec()
+
     def _query(self, year: int) -> object:
         return self._use_case.run(
             QueryRequest(
@@ -265,15 +284,17 @@ class CompareTab(QWidget):
         if not has_data:
             return
 
-        self._meter_view.store_interaction(
-            _compare_meter_render(dash_a, dash_b, year_a, year_b, self._dark, self._tr)()
-        )
-        self._usage_view.store_interaction(
-            _compare_usage_render(dash_a, dash_b, year_a, year_b, self._agg, self._dark, self._tr)()
-        )
-        self._monthly_view.store_interaction(
-            _compare_monthly_render(dash_a, dash_b, year_a, year_b, self._dark, self._tr)()
-        )
+        meter_render = _compare_meter_render(dash_a, dash_b, year_a, year_b, self._dark, self._tr)()
+        usage_render = _compare_usage_render(dash_a, dash_b, year_a, year_b, self._agg, self._dark, self._tr)()
+        monthly_render = _compare_monthly_render(dash_a, dash_b, year_a, year_b, self._dark, self._tr)()
+        self._last_renders = {
+            "meter": meter_render,
+            "usage": usage_render,
+            "monthly": monthly_render,
+        }
+        self._meter_view.store_interaction(meter_render)
+        self._usage_view.store_interaction(usage_render)
+        self._monthly_view.store_interaction(monthly_render)
 
 
 # -- two-year chart builders ---------------------------------------------------------
@@ -369,7 +390,7 @@ def _compare_meter_render(dash_a, dash_b, year_a: int, year_b: int, dark: bool, 
                     label=label,
                 )
             if series_data:
-                ax.legend(loc="best", fontsize=8, frameon=False)
+                ax.legend(loc="best", fontsize=8, frameon=False, labelcolor=_TEXT_COLOR[dark])
 
         return MplRender(draw=draw, targets=targets, x_tol=x_tol, y_tol=y_tol)
 
@@ -434,7 +455,7 @@ def _compare_usage_render(dash_a, dash_b, year_a: int, year_b: int, agg: Aggrega
                     label=label,
                 )
             if series_data:
-                ax.legend(loc="best", fontsize=8, frameon=False)
+                ax.legend(loc="best", fontsize=8, frameon=False, labelcolor=_TEXT_COLOR[dark])
 
         return MplRender(draw=draw, targets=targets, x_tol=x_tol, y_tol=y_tol)
 
@@ -500,7 +521,7 @@ def _compare_monthly_render(dash_a, dash_b, year_a: int, year_b: int, dark: bool
             ax.margins(y=0.15)
             _bar_value_labels(ax, bars_a, unit.value, dark, tr)
             _bar_value_labels(ax, bars_b, unit.value, dark, tr)
-            ax.legend(loc="best", fontsize=8, frameon=False)
+            ax.legend(loc="best", fontsize=8, frameon=False, labelcolor=_TEXT_COLOR[dark])
 
         return MplRender(
             draw=draw,

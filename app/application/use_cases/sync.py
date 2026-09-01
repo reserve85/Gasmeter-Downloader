@@ -130,6 +130,17 @@ class SyncMissingLogfilesUseCase:
 
         candidates = self._filter_by_device_listing(missing, missing_on_device)
         for day in sorted(candidates):
+            # Check the archive first — avoids re-downloading and duplicate files.
+            archive_path = self._archiver.find_by_date(day)
+            if archive_path is not None:
+                outcome = import_logfile(self._repo, self._parser, self._logger, archive_path)
+                imported.append(outcome)
+                self._logger.log(
+                    LogCategory.ARCHIVE,
+                    LogLevel.INFO,
+                    f"Imported from archive: {archive_path.name} ({outcome.status})",
+                )
+                continue
             try:
                 path = self._download_one(day)
             except Exception as exc:  # noqa: BLE001 - any transport failure must be surfaced

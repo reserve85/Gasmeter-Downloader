@@ -60,6 +60,7 @@ class LogfileParser(Protocol):
 class LogfileArchiver(Protocol):
     def archive(self, path: Path) -> Path | None: ...  # move, never delete; None if already archived
     def is_archived(self, path: Path) -> bool: ...
+    def find_by_date(self, day: date) -> Path | None: ...  # scan archive for a file matching the day
 
 
 class AppSettings(Protocol):

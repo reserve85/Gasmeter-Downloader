@@ -70,3 +70,50 @@ def test_archive_of_file_already_in_archive_is_noop(tmp_path):
 def test_archive_missing_source_returns_none(tmp_path):
     archiver = FileArchiver(tmp_path / "archive")
     assert archiver.archive(tmp_path / "missing.csv") is None
+
+
+def test_find_by_date_returns_matching_file(tmp_path):
+    from datetime import date
+
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / "data_2026-01-15.csv").write_text("content")
+    archiver = FileArchiver(archive_dir)
+
+    result = archiver.find_by_date(date(2026, 1, 15))
+
+    assert result is not None
+    assert result.name == "data_2026-01-15.csv"
+
+
+def test_find_by_date_returns_none_when_not_found(tmp_path):
+    from datetime import date
+
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / "data_2026-01-15.csv").write_text("content")
+    archiver = FileArchiver(archive_dir)
+
+    assert archiver.find_by_date(date(2026, 1, 16)) is None
+
+
+def test_find_by_date_returns_none_when_dir_missing(tmp_path):
+    from datetime import date
+
+    archiver = FileArchiver(tmp_path / "nonexistent")
+    assert archiver.find_by_date(date(2026, 1, 1)) is None
+
+
+def test_find_by_date_matches_suffixed_duplicates(tmp_path):
+    """Files like data_2026-01-15_1.csv (collision suffix) are also found."""
+    from datetime import date
+
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    (archive_dir / "data_2026-01-15_1.csv").write_text("dup")
+    archiver = FileArchiver(archive_dir)
+
+    result = archiver.find_by_date(date(2026, 1, 15))
+
+    assert result is not None
+    assert "data_2026-01-15" in result.name
