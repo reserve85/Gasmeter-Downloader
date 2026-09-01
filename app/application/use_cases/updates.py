@@ -43,17 +43,11 @@ class ApplyUpdateUseCase:
         self._logger.log(LogCategory.UPDATE, LogLevel.INFO, "Applying update …")
         applied = self._port.apply(path)
         if applied:
-            self._logger.log(LogCategory.UPDATE, LogLevel.INFO, "Update applied; restarting app")
-            # github_updater replaces the exe via a detached batch script; the app
-            # must then exit so the new version can take over on the next start.
-            try:
-                self._port.restart()
-            except Exception as exc:  # noqa: BLE001 - restart is best-effort
-                self._logger.log(
-                    LogCategory.UPDATE,
-                    LogLevel.WARNING,
-                    f"Update applied but restart failed: {exc}",
-                )
+            self._logger.log(
+                LogCategory.UPDATE,
+                LogLevel.INFO,
+                "Update staged; the helper will swap the exe after the app exits.",
+            )
         else:
             self._logger.log(LogCategory.UPDATE, LogLevel.ERROR, "Update apply failed")
         return applied

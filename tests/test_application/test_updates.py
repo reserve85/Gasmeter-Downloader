@@ -64,20 +64,18 @@ def test_apply_update_full_flow(logger):
     port = FakeUpdatePort()
     use_case = ApplyUpdateUseCase(port, logger)
     assert use_case.run("http://x/a.exe", token="") is True
-    # github_updater contract: apply_update() must be followed by restart_app()
-    assert port.restarts == 1
+    # The use case no longer calls restart — the batch helper swaps the exe
+    # after the app exits naturally.  Verify it was NOT called.
+    assert port.restarts == 0
+    assert any("staged" in m for _, _, m in logger.events)
 
 
-def test_apply_update_restart_failure_is_logged(logger):
+def test_apply_update_no_restart_after_staged(logger):
+    """After staging, the use case does not kill the process."""
     port = FakeUpdatePort()
-
-    def boom():
-        raise RuntimeError("cannot exit")
-
-    port.restart = boom
     use_case = ApplyUpdateUseCase(port, logger)
-    assert use_case.run("http://x/a.exe", token="") is True  # apply still succeeded
-    assert any("restart failed" in m for _, _, m in logger.events)
+    assert use_case.run("http://x/a.exe", token="") is True
+    assert port.restarts == 0
 
 
 def test_apply_update_failed_download(logger):

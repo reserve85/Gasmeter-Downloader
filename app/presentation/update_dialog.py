@@ -105,4 +105,4 @@ class UpdateDialog(QDialog):
             self._status.setText(self._tr.t("update.error", error="apply failed"))
             return
         self._status.setText(self._tr.t("update.restarted"))
-        QApplication.quit()
+        self._apply_button.setEnabled(False)
